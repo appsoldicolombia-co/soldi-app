@@ -16,7 +16,7 @@ import {
   limit,
   getDocs,
   startAfter
-} from "firebase/firestore"; 
+} from "firebase/firestore";
 import { db, auth } from "./firebase"; 
 
 function App() {
@@ -29,10 +29,10 @@ function App() {
   
   // Estado del menú: 'dashboard', 'registrar', 'historial'
   const [seccionActiva, setSeccionActiva] = useState("dashboard");
-
+  
   // Métricas
   const [metricasMes, setMetricasMes] = useState({ total_ventas: 0, cantidad_transacciones: 0 });
-
+  
   // Historial y Paginación
   const [facturas, setFacturas] = useState([]);
   const [ultimoDoc, setUltimoDoc] = useState(null);
@@ -48,17 +48,19 @@ function App() {
   const [identificacion, setIdentificacion] = useState("");
   const [nombreCliente, setNombreCliente] = useState("");
   const [correoCliente, setCorreoCliente] = useState("");
-  const [celularCliente, setCelularCliente] = useState(""); // NUEVO: Estado para el celular
+  const [celularCliente, setCelularCliente] = useState("");
+  
+  // NUEVO: Estado para el celular
   const [concepto, setConcepto] = useState("");
   const [monto, setMonto] = useState("");
   const [metodoPago, setMetodoPago] = useState("Efectivo");
   const [tarifaIva, setTarifaIva] = useState("0");
-
+  
   const obtenerPeriodoActual = () => {
     const fecha = new Date();
     return `${fecha.getFullYear()}_${String(fecha.getMonth() + 1).padStart(2, "0")}`;
   };
-
+  
   useEffect(() => {
     const desuscribirAuth = onAuthStateChanged(auth, async (user) => {
       setUsuario(user);
@@ -132,11 +134,10 @@ function App() {
       setCargandoHistorial(false);
     }
   };
-
+  
   const cargarMasFacturas = async () => {
     if (!usuario || !ultimoDoc || cargandoHistorial) return;
     setCargandoHistorial(true);
-
     try {
       const q = query(
         collection(db, `negocios/${usuario.uid}/facturas`),
@@ -160,7 +161,7 @@ function App() {
       setCargandoHistorial(false);
     }
   };
-
+  
   const ejecutarAuth = async (e) => {
     e.preventDefault();
     setProcesandoAccion(true);
@@ -169,7 +170,6 @@ function App() {
         const credenciales = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
         const batch = writeBatch(db);
         const negocioRef = doc(db, "negocios", credenciales.user.uid);
-        
         batch.set(negocioRef, { 
           nombre_comercial: nombreNegocio, 
           fecha_registro: new Date(), 
@@ -188,7 +188,7 @@ function App() {
       setProcesandoAccion(false);
     }
   };
-
+  
   const cerrarSesion = () => {
     signOut(auth);
     setMetricasMes({ total_ventas: 0, cantidad_transacciones: 0 });
@@ -202,12 +202,10 @@ function App() {
     e.preventDefault();
     if (!usuario || !negocioActivo) return;
     setProcesandoAccion(true);
-    
     try {
       const fechaActual = new Date();
       const periodoMetricas = obtenerPeriodoActual();
       const batch = writeBatch(db);
-
       const totalPagar = Number(monto);
       const factorDivisor = 1 + (Number(tarifaIva) / 100);
       const baseGravable = totalPagar / factorDivisor;
@@ -219,7 +217,7 @@ function App() {
           identificacion: identificacion || "Consumidor Final",
           nombre: nombreCliente || "Cuantías Menores",
           correo: correoCliente || "N/A",
-          celular: celularCliente || "N/A" // NUEVO: Se guarda el celular en la base de datos
+          celular: celularCliente || "N/A"
         },
         venta: { 
           concepto, 
@@ -232,7 +230,7 @@ function App() {
         estado_dian: tipoDoc === "Factura Electrónica" ? "Pendiente" : "No aplica",
         fecha_creacion: fechaActual
       };
-
+      
       const facturaRef = doc(collection(db, `negocios/${usuario.uid}/facturas`));
       batch.set(facturaRef, nuevaFacturaData);
 
@@ -242,7 +240,7 @@ function App() {
         cantidad_transacciones: increment(1),
         ultima_actualizacion: fechaActual
       }, { merge: true });
-
+      
       await batch.commit();
       
       setFacturas(prev => [{ id: facturaRef.id, ...nuevaFacturaData }, ...prev]);
@@ -252,7 +250,7 @@ function App() {
       setIdentificacion(""); 
       setNombreCliente(""); 
       setCorreoCliente(""); 
-      setCelularCliente(""); // Limpiamos el nuevo campo
+      setCelularCliente("");
       setConcepto(""); 
       setMonto(""); 
       setTarifaIva("0");
@@ -262,11 +260,10 @@ function App() {
       setProcesandoAccion(false);
     }
   };
-
+  
   const descargarPDF = (factura) => {
     const elemento = document.getElementById(`comprobante-render-${factura.id}`);
     if (!elemento) return;
-
     const opciones = {
       margin: 15,
       filename: `Comprobante_${factura.id.substring(0, 8)}.pdf`,
@@ -274,44 +271,45 @@ function App() {
       html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: "mm", format: "letter", orientation: "portrait" }
     };
-
     elemento.style.display = "block";
     window.html2pdf().set(opciones).from(elemento).save().then(() => {
       elemento.style.display = "none";
     });
   };
-
+  
+  // ESTILOS OPTIMIZADOS PARA MÓVIL Y ESCRITORIO
   const styles = {
-    authContainer: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", fontFamily: "sans-serif", margin: "-8px" },
-    appLayout: { display: "flex", minHeight: "100vh", backgroundColor: "#f8fafc", fontFamily: "sans-serif", margin: "-8px" },
-    sidebar: { width: "260px", backgroundColor: "#0f172a", color: "#ffffff", display: "flex", flexDirection: "column", padding: "24px 16px", boxSizing: "border-box" },
-    logoSection: { fontSize: "22px", fontWeight: "800", marginBottom: "32px", paddingLeft: "12px", letterSpacing: "-0.5px", display: "flex", alignItems: "baseline", gap: "6px" },
+    authContainer: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", fontFamily: "sans-serif", padding: "16px", boxSizing: "border-box" },
+    appLayout: { display: "flex", flexWrap: "wrap", minHeight: "100vh", backgroundColor: "#f8fafc", fontFamily: "sans-serif" },
+    sidebar: { width: "100%", minWidth: "260px", flex: "1 1 260px", backgroundColor: "#0f172a", color: "#ffffff", display: "flex", flexDirection: "column", padding: "24px 16px", boxSizing: "border-box" },
+    logoSection: { fontSize: "22px", fontWeight: "800", marginBottom: "24px", paddingLeft: "12px", letterSpacing: "-0.5px", display: "flex", alignItems: "baseline", gap: "6px" },
     versionTag: { fontSize: "9px", color: "#475569", fontWeight: "400", letterSpacing: "0px" },
+    
     menuBtn: (activo) => ({
       width: "100%", padding: "12px 16px", borderRadius: "6px", border: "none", backgroundColor: activo ? "#1e293b" : "transparent",
       color: activo ? "#ffffff" : "#94a3b8", textAlign: "left", fontSize: "14px", fontWeight: "600", cursor: "pointer", marginBottom: "8px", transition: "all 0.2s"
     }),
-    logoutBtn: { width: "100%", padding: "12px 16px", borderRadius: "6px", border: "1px solid #334155", backgroundColor: "transparent", color: "#f1f5f9", fontSize: "13px", fontWeight: "500", cursor: "pointer", marginTop: "auto" },
-    mainContent: { flex: 1, padding: "40px", boxSizing: "border-box", overflowY: "auto" },
-    card: { backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", padding: "28px" },
+    logoutBtn: { width: "100%", padding: "12px 16px", borderRadius: "6px", border: "1px solid #334155", backgroundColor: "transparent", color: "#f1f5f9", fontSize: "13px", fontWeight: "500", cursor: "pointer", marginTop: "16px" },
+    mainContent: { flex: "1 1 300px", padding: "20px", boxSizing: "border-box" },
+    card: { backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", padding: "20px", boxSizing: "border-box" },
     title: { fontSize: "20px", fontWeight: "700", color: "#0f172a", margin: "0 0 6px 0" },
     subtitle: { fontSize: "13px", color: "#64748b", margin: "0 0 24px 0" },
     field: { display: "flex", flexDirection: "column", marginBottom: "14px" },
     label: { fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "6px" },
     input: { width: "100%", padding: "10px 12px", fontSize: "13px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" },
-    row: { display: "flex", gap: "16px" },
+    row: { display: "flex", flexWrap: "wrap", gap: "16px" },
     sectionLabel: { fontSize: "11px", fontWeight: "700", color: "#475569", textTransform: "uppercase", margin: "24px 0 12px 0", paddingBottom: "6px", borderBottom: "1px solid #f1f5f9" },
     btnPrimary: { width: "100%", padding: "12px", fontSize: "13px", fontWeight: "600", color: "#ffffff", border: "none", borderRadius: "6px", cursor: "pointer", marginTop: "10px" },
-    kpiGrid: { display: "flex", gap: "20px", marginBottom: "24px" },
-    kpiCard: { flex: 1, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "24px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
+    kpiGrid: { display: "flex", flexWrap: "wrap", gap: "16px", marginBottom: "24px" },
+    kpiCard: { flex: "1 1 200px", backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "20px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
     kpiLabel: { fontSize: "12px", fontWeight: "600", color: "#64748b", textTransform: "uppercase", margin: 0 },
-    kpiValue: { fontSize: "28px", fontWeight: "800", color: "#0f172a", margin: "8px 0 0 0" },
+    kpiValue: { fontSize: "24px", fontWeight: "800", color: "#0f172a", margin: "8px 0 0 0" },
     table: { width: "100%", borderCollapse: "collapse", fontSize: "13px" },
     th: { textAlign: "left", padding: "12px", backgroundColor: "#f8fafc", color: "#475569", fontWeight: "600", borderBottom: "1px solid #e2e8f0" },
     td: { padding: "14px 12px", borderBottom: "1px solid #f1f5f9", color: "#334155" },
     btnAction: { backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "6px 12px", fontSize: "11px", fontWeight: "600", color: "#334155", cursor: "pointer", transition: "all 0.1s" }
   };
-
+  
   if (cargandoAuth) {
     return <div style={styles.authContainer}><p style={{color: "#64748b", fontSize: "14px"}}>Cargando plataforma corporativa...</p></div>;
   }
@@ -503,134 +501,134 @@ function App() {
               <p style={{fontSize: "13px", color: "#64748b", textAlign: "center", padding: "24px 0"}}>No se registran operaciones previas en este establecimiento.</p>
             ) : (
               <>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>Concepto Comercial</th>
-                      <th style={styles.th}>Adquirente</th>
-                      <th style={styles.th}>Medio</th>
-                      <th style={styles.th} style={{textAlign: "right", paddingRight: "12px"}}>Monto Total</th>
-                      <th style={styles.th} style={{textAlign: "center"}}>Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {facturas.map((factura) => (
-                      <tr key={factura.id}>
-                        <td style={styles.td}>
-                          <div style={{fontWeight: "600", color: "#0f172a"}}>{factura.venta.concepto}</div>
-                          <span style={{
-                            fontSize: "11px", fontWeight: "600", padding: "2px 6px", borderRadius: "4px",
-                            backgroundColor: factura.tipo_documento === "Factura Electrónica" ? "#e0f2fe" : "#f1f5f9",
-                            color: factura.tipo_documento === "Factura Electrónica" ? "#0369a1" : "#475569"
-                          }}>
-                            {factura.tipo_documento === "Factura Electrónica" ? "Factura Electrónica" : "Recibo Interno"}
-                          </span>
-                        </td>
-                        <td style={styles.td}>
-                          <div style={{fontWeight: "500"}}>{factura.cliente.nombre}</div>
-                          <div style={{fontSize: "11px", color: "#64748b"}}>{factura.cliente.identificacion}</div>
-                        </td>
-                        <td style={styles.td}>
-                          <span style={{fontSize: "12px", backgroundColor: "#f1f5f9", padding: "4px 8px", borderRadius: "4px"}}>
-                            {factura.venta.metodo_pago}
-                          </span>
-                        </td>
-                        <td style={styles.td} style={{textAlign: "right", fontWeight: "700", color: "#0f172a", fontSize: "14px"}}>
-                          ${Number(factura.venta.monto_total).toLocaleString("es-CO")}
-                        </td>
-                        <td style={styles.td} style={{textAlign: "center"}}>
-                          <button 
-                            onClick={() => descargarPDF(factura)}
-                            style={styles.btnAction}
-                          >
-                            Descargar PDF
-                          </button>
-
-                          {/* PLANTILLA DE COMPROBANTE OCULTA */}
-                          <div 
-                            id={`comprobante-render-${factura.id}`} 
-                            style={{ 
-                              display: "none", 
-                              fontFamily: "sans-serif", 
-                              color: "#0f172a", 
-                              padding: "20px",
-                              backgroundColor: "#ffffff"
-                            }}
-                          >
-                            <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: "15px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <div>
-                                <h1 style={{ fontSize: "24px", fontWeight: "800", margin: 0, color: "#0f172a" }}>SOLDI</h1>
-                                <p style={{ fontSize: "12px", color: "#64748b", margin: "2px 0 0 0" }}>Plataforma de Control Comercial</p>
-                              </div>
-                              <div style={{ textAlign: "right" }}>
-                                <h2 style={{ fontSize: "14px", fontWeight: "700", margin: 0, color: "#475569" }}>{factura.tipo_documento.toUpperCase()}</h2>
-                                <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 0" }}>ID: {factura.id.toUpperCase()}</p>
-                              </div>
-                            </div>
-
-                            <div style={{ marginBottom: "25px", display: "flex", gap: "40px" }}>
-                              <div style={{ flex: 1 }}>
-                                <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Información del Adquirente</h3>
-                                <p style={{ fontSize: "13px", fontWeight: "700", margin: "0 0 2px 0" }}>{factura.cliente.nombre}</p>
-                                <p style={{ fontSize: "12px", margin: "0 0 2px 0" }}>NIT/Cédula: {factura.cliente.identificacion}</p>
-                                
-                                {/* NUEVO: Mostrar el celular si existe en la base de datos */}
-                                <p style={{ fontSize: "12px", margin: 0 }}>
-                                  Correo: {factura.cliente.correo} 
-                                  {factura.cliente.celular && factura.cliente.celular !== "N/A" ? ` | Tel: ${factura.cliente.celular}` : ""}
-                                </p>
-
-                              </div>
-                              <div style={{ flex: 1 }}>
-                                <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Detalles de la Transacción</h3>
-                                <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Fecha de Emisión:</strong> {factura.fecha_creacion?.seconds ? new Date(factura.fecha_creacion.seconds * 1000).toLocaleString("es-CO") : new Date().toLocaleString("es-CO")}</p>
-                                <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Canal de Liquidación:</strong> {factura.venta.metodo_pago}</p>
-                                <p style={{ fontSize: "12px", margin: 0 }}><strong>Estado DIAN:</strong> {factura.estado_dian}</p>
-                              </div>
-                            </div>
-
-                            <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "20px" }}>
-                              <thead>
-                                <tr>
-                                  <th style={{ textAlign: "left", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Concepto / Descripción</th>
-                                  <th style={{ textAlign: "center", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Tarifa IVA</th>
-                                  <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Base Gravable</th>
-                                  <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Valor Total</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <tr>
-                                  <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", color: "#334155" }}>{factura.venta.concepto}</td>
-                                  <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{factura.venta.porcentaje_iva ?? 0}%</td>
-                                  <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                  <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right", fontWeight: "600" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                  <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b" }}>Subtotal Neto (Base):</td>
-                                  <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                  <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>Impuesto Liquidado (IVA):</td>
-                                  <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600", borderBottom: "1px solid #e2e8f0" }}>${Number(factura.venta.valor_iva ?? 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                                <tr>
-                                  <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "700", fontSize: "13px" }}>Monto Total Recibido:</td>
-                                  <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "800", fontSize: "16px", color: "#0f172a" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                </tr>
-                              </tbody>
-                            </table>
-
-                            <div style={{ marginTop: "50px", textAlign: "center", borderTop: "1px dashed #cbd5e1", paddingTop: "15px" }}>
-                              <p style={{ fontSize: "11px", color: "#64748b", margin: 0 }}>Este documento constituye un soporte contable digital emitido de forma válida.</p>
-                              <p style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>Generado automáticamente por la infraestructura de red de Soldi v1.1.</p>
-                            </div>
-                          </div>
-
-                        </td>
+                <div style={{ width: "100%", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                  <table style={styles.table}>
+                    <thead>
+                      <tr>
+                        <th style={styles.th}>Concepto Comercial</th>
+                        <th style={styles.th}>Adquirente</th>
+                        <th style={styles.th}>Medio</th>
+                        <th style={{...styles.th, textAlign: "right", paddingRight: "12px"}}>Monto Total</th>
+                        <th style={{...styles.th, textAlign: "center"}}>Acciones</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {facturas.map((factura) => (
+                        <tr key={factura.id}>
+                          <td style={styles.td}>
+                            <div style={{fontWeight: "600", color: "#0f172a"}}>{factura.venta.concepto}</div>
+                            <span style={{
+                              fontSize: "11px", fontWeight: "600", padding: "2px 6px", borderRadius: "4px",
+                              backgroundColor: factura.tipo_documento === "Factura Electrónica" ? "#e0f2fe" : "#f1f5f9",
+                              color: factura.tipo_documento === "Factura Electrónica" ? "#0369a1" : "#475569"
+                            }}>
+                              {factura.tipo_documento === "Factura Electrónica" ? "Factura Electrónica" : "Recibo Interno"}
+                            </span>
+                          </td>
+                          <td style={styles.td}>
+                            <div style={{fontWeight: "500"}}>{factura.cliente.nombre}</div>
+                            <div style={{fontSize: "11px", color: "#64748b"}}>{factura.cliente.identificacion}</div>
+                          </td>
+                          <td style={styles.td}>
+                            <span style={{fontSize: "12px", backgroundColor: "#f1f5f9", padding: "4px 8px", borderRadius: "4px"}}>
+                              {factura.venta.metodo_pago}
+                            </span>
+                          </td>
+                          <td style={{...styles.td, textAlign: "right", fontWeight: "700", color: "#0f172a", fontSize: "14px"}}>
+                            ${Number(factura.venta.monto_total).toLocaleString("es-CO")}
+                          </td>
+                          <td style={{...styles.td, textAlign: "center"}}>
+                            <button 
+                              onClick={() => descargarPDF(factura)}
+                              style={styles.btnAction}
+                            >
+                              Descargar PDF
+                            </button>
+
+                            {/* PLANTILLA DE COMPROBANTE OCULTA */}
+                            <div 
+                              id={`comprobante-render-${factura.id}`} 
+                              style={{ 
+                                display: "none", 
+                                fontFamily: "sans-serif", 
+                                color: "#0f172a", 
+                                padding: "20px",
+                                backgroundColor: "#ffffff"
+                              }}
+                            >
+                              <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: "15px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                <div>
+                                  <h1 style={{ fontSize: "24px", fontWeight: "800", margin: 0, color: "#0f172a" }}>SOLDI</h1>
+                                  <p style={{ fontSize: "12px", color: "#64748b", margin: "2px 0 0 0" }}>Plataforma de Control Comercial</p>
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  <h2 style={{ fontSize: "14px", fontWeight: "700", margin: 0, color: "#475569" }}>{factura.tipo_documento.toUpperCase()}</h2>
+                                  <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 0" }}>ID: {factura.id.toUpperCase()}</p>
+                                </div>
+                              </div>
+
+                              <div style={{ marginBottom: "25px", display: "flex", gap: "40px" }}>
+                                <div style={{ flex: 1 }}>
+                                  <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Información del Adquirente</h3>
+                                  <p style={{ fontSize: "13px", fontWeight: "700", margin: "0 0 2px 0" }}>{factura.cliente.nombre}</p>
+                                  <p style={{ fontSize: "12px", margin: "0 0 2px 0" }}>NIT/Cédula: {factura.cliente.identificacion}</p>
+                                  <p style={{ fontSize: "12px", margin: 0 }}>
+                                    Correo: {factura.cliente.correo} 
+                                    {factura.cliente.celular && factura.cliente.celular !== "N/A" ? ` | Tel: ${factura.cliente.celular}` : ""}
+                                  </p>
+
+                                </div>
+                                <div style={{ flex: 1 }}>
+                                  <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Detalles de la Transacción</h3>
+                                  <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Fecha de Emisión:</strong> {factura.fecha_creacion?.seconds ? new Date(factura.fecha_creacion.seconds * 1000).toLocaleString("es-CO") : new Date().toLocaleString("es-CO")}</p>
+                                  <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Canal de Liquidación:</strong> {factura.venta.metodo_pago}</p>
+                                  <p style={{ fontSize: "12px", margin: 0 }}><strong>Estado DIAN:</strong> {factura.estado_dian}</p>
+                                </div>
+                              </div>
+
+                              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "20px" }}>
+                                <thead>
+                                  <tr>
+                                    <th style={{ textAlign: "left", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Concepto / Descripción</th>
+                                    <th style={{ textAlign: "center", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Tarifa IVA</th>
+                                    <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Base Gravable</th>
+                                    <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Valor Total</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  <tr>
+                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", color: "#334155" }}>{factura.venta.concepto}</td>
+                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{factura.venta.porcentaje_iva ?? 0}%</td>
+                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right", fontWeight: "600" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                                  </tr>
+                                  <tr>
+                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b" }}>Subtotal Neto (Base):</td>
+                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                                  </tr>
+                                  <tr>
+                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>Impuesto Liquidado (IVA):</td>
+                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600", borderBottom: "1px solid #e2e8f0" }}>${Number(factura.venta.valor_iva ?? 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                                  </tr>
+                                  <tr>
+                                    <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "700", fontSize: "13px" }}>Monto Total Recibido:</td>
+                                    <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "800", fontSize: "16px", color: "#0f172a" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+
+                              <div style={{ marginTop: "50px", textAlign: "center", borderTop: "1px dashed #cbd5e1", paddingTop: "15px" }}>
+                                <p style={{ fontSize: "11px", color: "#64748b", margin: 0 }}>Este documento constituye un soporte contable digital emitido de forma válida.</p>
+                                <p style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>Generado automáticamente por la infraestructura de red de Soldi v1.1.</p>
+                              </div>
+                            </div>
+
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
                 {hayMasFacturas && (
                   <button 
