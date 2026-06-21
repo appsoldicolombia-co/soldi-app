@@ -436,16 +436,21 @@ function App() {
 
   const descontarAlmuerzo = async (v) => {
     if (v.saldo <= 0) return;
+    const nuevoSaldo = v.saldo - 1;
     await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), {
-      saldo: v.saldo - 1,
-      usos: arrayUnion(new Date())
+      saldo: nuevoSaldo,
+      usos: arrayUnion({ fecha: new Date(), tipo: "descuento", cantidad: 1, saldo_resultante: nuevoSaldo })
     }, { merge: true });
   };
 
   const recargarValera = async (v) => {
     const cant = Number(recargaVal[v.id] || 0);
     if (cant <= 0) return;
-    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), { saldo: v.saldo + cant }, { merge: true });
+    const nuevoSaldo = v.saldo + cant;
+    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), {
+      saldo: nuevoSaldo,
+      usos: arrayUnion({ fecha: new Date(), tipo: "recarga", cantidad: cant, saldo_resultante: nuevoSaldo })
+    }, { merge: true });
     setRecargaVal(prev => ({ ...prev, [v.id]: "" }));
   };
 
@@ -1493,14 +1498,24 @@ function App() {
                           {(v.usos||[]).length === 0
                             ? <p style={{fontSize:"12px",color:"#94a3b8",margin:0}}>Sin usos registrados aún.</p>
                             : <div style={{display:"flex",flexDirection:"column",gap:"4px",maxHeight:"180px",overflowY:"auto"}}>
-                              {[...(v.usos||[])].sort((a,b)=>(b?.seconds||0)-(a?.seconds||0)).map((u,i)=>{
-                                const fecha = u?.toDate ? u.toDate() : u?.seconds ? new Date(u.seconds*1000) : new Date(u);
+                              {[...(v.usos||[])].sort((a,b)=>{
+                                const ta = a?.fecha?.seconds || a?.seconds || 0;
+                                const tb = b?.fecha?.seconds || b?.seconds || 0;
+                                return tb - ta;
+                              }).map((u,i)=>{
+                                const raw = u?.fecha || u;
+                                const fecha = raw?.toDate ? raw.toDate() : raw?.seconds ? new Date(raw.seconds*1000) : new Date(raw);
+                                const esDescuento = !u?.tipo || u.tipo === "descuento";
+                                const cantidad = u?.cantidad ?? 1;
+                                const saldoRes = u?.saldo_resultante ?? "—";
                                 return (
-                                  <div key={i} style={{display:"flex",alignItems:"center",gap:"8px",fontSize:"12px",color:"#475569",padding:"4px 0",borderBottom:"1px solid #f8fafc"}}>
-                                    <span style={{fontSize:"10px",backgroundColor:"#f1f5f9",borderRadius:"4px",padding:"2px 6px",fontWeight:"600",color:"#64748b",flexShrink:0}}>#{(v.usos||[]).length - i}</span>
-                                    <span>{fecha.toLocaleDateString("es-CO",{weekday:"short",day:"numeric",month:"short"})}</span>
-                                    <span style={{color:"#94a3b8"}}>—</span>
-                                    <span style={{fontWeight:"600"}}>{fecha.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"})}</span>
+                                  <div key={i} style={{display:"flex",alignItems:"center",gap:"8px",fontSize:"12px",padding:"5px 0",borderBottom:"1px solid #f8fafc",flexWrap:"wrap"}}>
+                                    <span style={{fontSize:"10px",borderRadius:"4px",padding:"2px 8px",fontWeight:"700",flexShrink:0,backgroundColor:esDescuento?"#fee2e2":"#dcfce7",color:esDescuento?"#dc2626":"#16a34a"}}>
+                                      {esDescuento ? `−${cantidad}` : `+${cantidad}`}
+                                    </span>
+                                    <span style={{color:"#475569"}}>{fecha.toLocaleDateString("es-CO",{weekday:"short",day:"numeric",month:"short"})}</span>
+                                    <span style={{fontWeight:"600",color:"#0f172a"}}>{fecha.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"})}</span>
+                                    <span style={{marginLeft:"auto",fontSize:"11px",color:"#64748b",flexShrink:0}}>saldo: <strong style={{color:"#0f172a"}}>{saldoRes}</strong></span>
                                   </div>
                                 );
                               })}
