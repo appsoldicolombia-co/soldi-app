@@ -22,7 +22,12 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verificar carpeta dist
+        run: |
+          echo "Contenido de dist/:"
+          ls -la dist/ 2>/dev/null || echo "❌ Carpeta dist no encontrada"
+
       - name: Deploy a Firebase Hosting
-        run: npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
+        run: npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive --debug 2>&1 | tail -50
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
