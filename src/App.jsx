@@ -1073,7 +1073,6 @@ function App() {
         {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <>
           <p style={S.mCat}>Agenda</p>
           <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>ir("agenda",()=>setTabAgenda(0))}>Agenda de Citas</button>
-          <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>ir("servicios")}>Catálogo de Servicios</button>
           <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>ir("profesionales")}>Profesionales</button>
         </>}
 
@@ -1086,6 +1085,9 @@ function App() {
           <p style={S.mCat}>Tienda</p>
           <button style={S.mBtn(seccionActiva==="fiar")} onClick={()=>ir("fiar")}>Sistema de Fiar</button>
         </>}
+
+        <p style={S.mCat}>Catálogo</p>
+        <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>ir("servicios")}>{tipoNegocio==="barberia"?"Servicios":"Productos"}</button>
 
         <p style={S.mCat}>Ajustes</p>
         <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>ir("perfil")}>Perfil del Negocio</button>
@@ -1111,43 +1113,94 @@ function App() {
 
         {/* ─── POS ────────────────────────────────────────────────────────── */}
         {seccionActiva==="registrar" && (
-          <div style={{maxWidth:"560px"}}>
+          <div style={{maxWidth:"520px"}}>
             <div style={S.card}>
               <h2 style={S.h1}>Registrar Venta</h2>
-              <p style={S.sub}>Emita recibos internos o facturas electrónicas de venta.</p>
+              <div style={S.field}>
+                <label style={S.label}>Tipo de Documento</label>
+                <select value={tipoDoc} onChange={e=>setTipoDoc(e.target.value)} style={{...S.input,fontWeight:"600"}}>
+                  <option value="Recibo Interno">Recibo Interno</option>
+                  <option value="Factura Electrónica">Factura Electrónica (DIAN)</option>
+                </select>
+              </div>
+
               <form onSubmit={registrarVenta}>
-                <div style={S.field}><label style={S.label}>Tipo de Documento</label>
-                  <select value={tipoDoc} onChange={e=>setTipoDoc(e.target.value)} style={{...S.input,fontWeight:"600",backgroundColor:"#f8fafc"}}>
-                    <option value="Recibo Interno">Recibo Interno</option>
-                    <option value="Factura Electrónica">Factura Electrónica (DIAN)</option>
-                  </select>
-                </div>
-                <div style={S.secLabel}>Datos del Cliente</div>
-                <div style={S.row}>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>Identificación</label><input type="text" placeholder="NIT o Cédula" value={identificacion} onChange={e=>setIdentificacion(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>Nombre</label><input type="text" placeholder="Nombre completo" value={nombreCliente} onChange={e=>setNombreCliente(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
-                </div>
-                <div style={S.row}>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>Correo</label><input type="email" placeholder="cliente@correo.com" value={correoCliente} onChange={e=>setCorreoCliente(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>Celular</label><input type="tel" placeholder="3001234567" value={celularCliente} onChange={e=>setCelularCliente(e.target.value)} style={S.input}/></div>
-                </div>
-                <div style={S.secLabel}>Detalle del Cobro</div>
-                <div style={S.field}><label style={S.label}>Concepto / Servicio</label><input type="text" placeholder="Ej: Corte de cabello" value={concepto} onChange={e=>setConcepto(e.target.value)} style={S.input} required/></div>
-                <div style={S.row}>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>Valor ($)</label><input type="number" placeholder="0" value={monto} onChange={e=>setMonto(e.target.value)} style={S.input} required/></div>
-                  <div style={{...S.field,flex:1}}><label style={S.label}>IVA</label>
-                    <select value={tarifaIva} onChange={e=>setTarifaIva(e.target.value)} style={S.input}>
-                      <option value="0">Exento (0%)</option><option value="19">General (19%)</option><option value="5">Especial (5%)</option>
-                    </select>
-                  </div>
-                </div>
-                <div style={S.field}><label style={S.label}>Método de Pago</label>
-                  <select value={metodoPago} onChange={e=>setMetodoPago(e.target.value)} style={S.input}>
-                    <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option value="Bancolombia">Transferencia</option><option>Tarjeta</option>
-                  </select>
-                </div>
+                {tipoDoc === "Recibo Interno" ? (
+                  <>
+                    <div style={S.field}>
+                      <label style={S.label}>Cliente <span style={{fontWeight:400,color:T.textSub}}>(opcional)</span></label>
+                      <input type="text" placeholder="Nombre del cliente" value={nombreCliente} onChange={e=>setNombreCliente(e.target.value)} style={S.input}/>
+                    </div>
+                    <div style={S.field}>
+                      <label style={S.label}>{tipoNegocio==="tienda"?"Producto":"Servicio / Producto"}</label>
+                      <input
+                        type="text"
+                        list="cat-sugerencias"
+                        placeholder={tipoNegocio==="tienda"?"Ej: Arroz, panela...":"Ej: Corte de cabello, almuerzo..."}
+                        value={concepto}
+                        onChange={e=>{
+                          setConcepto(e.target.value);
+                          const item = servicios.find(s=>s.nombre===e.target.value);
+                          if(item) setMonto(String(item.precio));
+                        }}
+                        style={S.input}
+                        required
+                        autoComplete="off"
+                      />
+                      <datalist id="cat-sugerencias">
+                        {servicios.map(s=>(
+                          <option key={s.id} value={s.nombre}>{s.nombre} — ${Number(s.precio).toLocaleString("es-CO")}</option>
+                        ))}
+                      </datalist>
+                    </div>
+                    <div style={S.field}>
+                      <label style={S.label}>Valor ($)</label>
+                      <input type="number" placeholder="0" value={monto} onChange={e=>setMonto(e.target.value)} style={S.input} required min="0"/>
+                    </div>
+                    <div style={S.field}>
+                      <label style={S.label}>Método de Pago</label>
+                      <select value={metodoPago} onChange={e=>setMetodoPago(e.target.value)} style={S.input}>
+                        <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option value="Bancolombia">Transferencia</option><option>Tarjeta</option>
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={S.secLabel}>Datos del Cliente</div>
+                    <div style={S.row}>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>Identificación</label><input type="text" placeholder="NIT o Cédula" value={identificacion} onChange={e=>setIdentificacion(e.target.value)} style={S.input} required/></div>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>Nombre</label><input type="text" placeholder="Nombre completo" value={nombreCliente} onChange={e=>setNombreCliente(e.target.value)} style={S.input} required/></div>
+                    </div>
+                    <div style={S.row}>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>Correo</label><input type="email" placeholder="cliente@correo.com" value={correoCliente} onChange={e=>setCorreoCliente(e.target.value)} style={S.input} required/></div>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>Celular</label><input type="tel" placeholder="3001234567" value={celularCliente} onChange={e=>setCelularCliente(e.target.value)} style={S.input}/></div>
+                    </div>
+                    <div style={S.secLabel}>Detalle del Cobro</div>
+                    <div style={S.field}>
+                      <label style={S.label}>Concepto / Servicio</label>
+                      <input type="text" list="cat-sugerencias-fe" placeholder="Ej: Corte de cabello" value={concepto} onChange={e=>{ setConcepto(e.target.value); const item=servicios.find(s=>s.nombre===e.target.value); if(item) setMonto(String(item.precio)); }} style={S.input} required autoComplete="off"/>
+                      <datalist id="cat-sugerencias-fe">
+                        {servicios.map(s=><option key={s.id} value={s.nombre}/>)}
+                      </datalist>
+                    </div>
+                    <div style={S.row}>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>Valor ($)</label><input type="number" placeholder="0" value={monto} onChange={e=>setMonto(e.target.value)} style={S.input} required/></div>
+                      <div style={{...S.field,flex:1}}><label style={S.label}>IVA</label>
+                        <select value={tarifaIva} onChange={e=>setTarifaIva(e.target.value)} style={S.input}>
+                          <option value="0">Exento (0%)</option><option value="19">General (19%)</option><option value="5">Especial (5%)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style={S.field}><label style={S.label}>Método de Pago</label>
+                      <select value={metodoPago} onChange={e=>setMetodoPago(e.target.value)} style={S.input}>
+                        <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option value="Bancolombia">Transferencia</option><option>Tarjeta</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+
                 <button type="submit" disabled={procesandoAccion} style={S.btnPrimary(tipoDoc==="Factura Electrónica"?"#0284c7":"#0f172a")}>
-                  {procesandoAccion?"Procesando...":"Emitir Documento"}
+                  {procesandoAccion?"Procesando...":tipoDoc==="Recibo Interno"?"Registrar":"Emitir Factura"}
                 </button>
               </form>
             </div>
@@ -1405,37 +1458,56 @@ function App() {
           </div>
         )}
 
-        {/* ─── CATÁLOGO DE SERVICIOS ──────────────────────────────────────── */}
+        {/* ─── CATÁLOGO ───────────────────────────────────────────────────── */}
         {seccionActiva==="servicios" && (
           <div>
             <div style={{...S.card,maxWidth:"600px",marginBottom:"16px"}}>
-              <h2 style={S.h1}>Agregar Servicio</h2>
-              <p style={S.sub}>Define los servicios con su precio y duración para usarlos en la agenda.</p>
+              <h2 style={S.h1}>{tipoNegocio==="barberia"?"Agregar Servicio":"Agregar Producto"}</h2>
+              <p style={S.sub}>{tipoNegocio==="barberia"
+                ?"Define servicios con precio y duración para la agenda automática."
+                :"Define los productos o ítems con su precio para sugerirlos al registrar ventas."
+              }</p>
               <form onSubmit={agregarServicio}>
                 <div style={S.row}>
-                  <div style={{...S.field,flex:2,minWidth:"160px"}}><label style={S.label}>Nombre del Servicio</label><input type="text" placeholder="Ej: Corte Clásico" value={nuevoServicio.nombre} onChange={e=>setNuevoServicio({...nuevoServicio,nombre:e.target.value})} style={S.input} required/></div>
-                  <div style={{...S.field,flex:1,minWidth:"90px"}}><label style={S.label}>Precio ($)</label><input type="number" placeholder="0" min="0" value={nuevoServicio.precio} onChange={e=>setNuevoServicio({...nuevoServicio,precio:e.target.value})} style={S.input}/></div>
-                  <div style={{...S.field,flex:1,minWidth:"100px"}}><label style={S.label}>Duración</label>
-                    <select value={nuevoServicio.duracion} onChange={e=>setNuevoServicio({...nuevoServicio,duracion:e.target.value})} style={S.input}>
-                      <option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 hora</option><option value="90">1h 30m</option><option value="120">2 horas</option>
-                    </select>
+                  <div style={{...S.field,flex:2,minWidth:"160px"}}>
+                    <label style={S.label}>{tipoNegocio==="barberia"?"Nombre del Servicio":"Nombre del Producto"}</label>
+                    <input type="text" placeholder={tipoNegocio==="tienda"?"Ej: Arroz 500g":"Ej: Almuerzo del día"} value={nuevoServicio.nombre} onChange={e=>setNuevoServicio({...nuevoServicio,nombre:e.target.value})} style={S.input} required/>
                   </div>
+                  <div style={{...S.field,flex:1,minWidth:"90px"}}>
+                    <label style={S.label}>Precio ($)</label>
+                    <input type="number" placeholder="0" min="0" value={nuevoServicio.precio} onChange={e=>setNuevoServicio({...nuevoServicio,precio:e.target.value})} style={S.input}/>
+                  </div>
+                  {tipoNegocio==="barberia" && (
+                    <div style={{...S.field,flex:1,minWidth:"100px"}}>
+                      <label style={S.label}>Duración</label>
+                      <select value={nuevoServicio.duracion} onChange={e=>setNuevoServicio({...nuevoServicio,duracion:e.target.value})} style={S.input}>
+                        <option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 hora</option><option value="90">1h 30m</option><option value="120">2 horas</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
-                <button type="submit" disabled={guardandoServicio} style={S.btnPrimary()}>{guardandoServicio?"Guardando...":"Agregar Servicio"}</button>
+                <button type="submit" disabled={guardandoServicio} style={S.btnPrimary()}>{guardandoServicio?"Guardando...":tipoNegocio==="barberia"?"Agregar Servicio":"Agregar Producto"}</button>
               </form>
             </div>
             <div style={{...S.card,maxWidth:"600px"}}>
-              <h2 style={{...S.h1,marginBottom:"16px"}}>Servicios del Catálogo</h2>
-              {servicios.length===0 ? <p style={{color:"#64748b",fontSize:"13px",textAlign:"center",padding:"20px"}}>No hay servicios registrados.</p> : (
+              <h2 style={{...S.h1,marginBottom:"16px"}}>{tipoNegocio==="barberia"?"Servicios del Catálogo":"Productos del Catálogo"}</h2>
+              {servicios.length===0 ? <p style={{color:T.textSub,fontSize:"13px",textAlign:"center",padding:"20px"}}>No hay {tipoNegocio==="barberia"?"servicios":"productos"} registrados.</p> : (
                 <table style={S.table}>
-                  <thead><tr><th style={S.th}>Servicio</th><th style={{...S.th,textAlign:"right"}}>Precio</th><th style={{...S.th,textAlign:"center"}}>Duración</th><th style={{...S.th,textAlign:"center"}}>Acción</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>{tipoNegocio==="barberia"?"Servicio":"Producto"}</th>
+                      <th style={{...S.th,textAlign:"right"}}>Precio</th>
+                      {tipoNegocio==="barberia" && <th style={{...S.th,textAlign:"center"}}>Duración</th>}
+                      <th style={{...S.th,textAlign:"center"}}>Acción</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {servicios.map(s=>(
                       <tr key={s.id}>
                         <td style={{...S.td,fontWeight:"600"}}>{s.nombre}</td>
                         <td style={{...S.td,textAlign:"right",fontWeight:"700"}}>${Number(s.precio).toLocaleString("es-CO")}</td>
-                        <td style={{...S.td,textAlign:"center"}}><span style={S.tag("#f0fdf4","#166534")}>{s.duracion} min</span></td>
-                        <td style={{...S.td,textAlign:"center"}}><button onClick={()=>eliminarServicio(s.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:"#fff",color:"#dc2626",cursor:"pointer"}}>Eliminar</button></td>
+                        {tipoNegocio==="barberia" && <td style={{...S.td,textAlign:"center"}}><span style={S.tag("#f0fdf4","#166534")}>{s.duracion} min</span></td>}
+                        <td style={{...S.td,textAlign:"center"}}><button onClick={()=>eliminarServicio(s.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:T.surface,color:"#dc2626",cursor:"pointer"}}>Eliminar</button></td>
                       </tr>
                     ))}
                   </tbody>
