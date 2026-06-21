@@ -22,9 +22,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Autenticar con Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
+
       - name: Deploy a Firebase Hosting
-        env:
-          SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
-        run: |
-          echo "$SA_JSON" > /tmp/sa.json
-          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
+        run: npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
