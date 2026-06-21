@@ -1,649 +1,1224 @@
 import { useState, useEffect } from "react";
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  onAuthStateChanged, 
-  signOut 
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signOut
 } from "firebase/auth";
-import { 
-  doc, 
-  collection, 
-  writeBatch, 
-  increment,
-  onSnapshot,
-  query,
-  orderBy,
-  limit,
-  getDocs,
-  startAfter
+import {
+  doc, collection, writeBatch, increment, onSnapshot,
+  query, orderBy, limit, getDocs, startAfter,
+  setDoc, addDoc, deleteDoc, where, getDoc
 } from "firebase/firestore";
-import { db, auth } from "./firebase"; 
+import { db, auth } from "./firebase";
 
+// ─── utilidades de tiempo ─────────────────────────────────────────────────────
+const toMin = (t) => parseInt(t.split(":")[0]) * 60 + parseInt(t.split(":")[1]);
+const toStr = (m) => `${String(Math.floor(m / 60)).padStart(2,"0")}:${String(m % 60).padStart(2,"0")}`;
+const hoy = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
+const nombreDia = (ds) => ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"][new Date(ds+"T12:00:00").getDay()];
+const fechaLarga = (ds) => new Date(ds+"T12:00:00").toLocaleDateString("es-CO",{weekday:"long",day:"numeric",month:"long"});
+const hora12 = (t) => { const [h,m]=t.split(":").map(Number); return `${h%12||12}:${String(m).padStart(2,"0")} ${h>=12?"pm":"am"}`; };
+const periodoActual = () => { const d=new Date(); return `${d.getFullYear()}_${String(d.getMonth()+1).padStart(2,"0")}`; };
+
+const generarSlots = (config, citas, duracion) => {
+  const dur = Number(duracion) || 30;
+  let cursor = toMin(config.hora_inicio || "08:00");
+  const fin = toMin(config.hora_fin || "18:00");
+  const activas = citas.filter(c => c.estado !== "cancelada");
+  const slots = [];
+  while (cursor + dur <= fin) {
+    const hi = toStr(cursor), hf = toStr(cursor + dur);
+    const ocupado = activas.some(c => cursor < toMin(c.hora_fin) && cursor + dur > toMin(c.hora_inicio));
+    slots.push({ horaInicio: hi, horaFin: hf, ocupado });
+    cursor += dur;
+  }
+  return slots;
+};
+
+// ─── componente principal ─────────────────────────────────────────────────────
 function App() {
-  // Control de usuario y estado del negocio
+
+  // auth / negocio
   const [usuario, setUsuario] = useState(null);
   const [negocioActivo, setNegocioActivo] = useState(true);
   const [cargandoAuth, setCargandoAuth] = useState(true);
   const [procesandoAccion, setProcesandoAccion] = useState(false);
   const [modoRegistro, setModoRegistro] = useState(false);
-  
-  // Estado del menú: 'dashboard', 'registrar', 'historial'
+
+  // navegación
   const [seccionActiva, setSeccionActiva] = useState("dashboard");
-  
-  // Métricas
+
+  // métricas
   const [metricasMes, setMetricasMes] = useState({ total_ventas: 0, cantidad_transacciones: 0 });
-  
-  // Historial y Paginación
+
+  // historial
   const [facturas, setFacturas] = useState([]);
   const [ultimoDoc, setUltimoDoc] = useState(null);
   const [hayMasFacturas, setHayMasFacturas] = useState(true);
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
 
-  // Formularios
+  // forms auth / pos
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [nombreNegocio, setNombreNegocio] = useState("");
-
   const [tipoDoc, setTipoDoc] = useState("Recibo Interno");
   const [identificacion, setIdentificacion] = useState("");
   const [nombreCliente, setNombreCliente] = useState("");
   const [correoCliente, setCorreoCliente] = useState("");
   const [celularCliente, setCelularCliente] = useState("");
-  
-  // NUEVO: Estado para el celular
   const [concepto, setConcepto] = useState("");
   const [monto, setMonto] = useState("");
   const [metodoPago, setMetodoPago] = useState("Efectivo");
   const [tarifaIva, setTarifaIva] = useState("0");
-  
-  const obtenerPeriodoActual = () => {
-    const fecha = new Date();
-    return `${fecha.getFullYear()}_${String(fecha.getMonth() + 1).padStart(2, "0")}`;
-  };
-  
+
+  // catálogo de servicios
+  const [servicios, setServicios] = useState([]);
+  const [nuevoServicio, setNuevoServicio] = useState({ nombre: "", precio: "", duracion: "30" });
+  const [guardandoServicio, setGuardandoServicio] = useState(false);
+
+  // profesionales
+  const [profesionales, setProfesionales] = useState([]);
+  const [nuevoProfesional, setNuevoProfesional] = useState({ nombre: "", especialidad: "" });
+  const [guardandoProfesional, setGuardandoProfesional] = useState(false);
+
+  // config agenda
+  const [configAgenda, setConfigAgenda] = useState({ hora_inicio: "08:00", hora_fin: "18:00", dias_activos: ["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"] });
+  const [guardandoConfig, setGuardandoConfig] = useState(false);
+
+  // agenda – estado compartido entre tabs
+  const [fechaAgenda, setFechaAgenda] = useState(hoy);
+  const [citasDelDia, setCitasDelDia] = useState([]);
+  const [cargandoCitas, setCargandoCitas] = useState(false);
+  const [tabAgenda, setTabAgenda] = useState(0); // 0=ver 1=nueva 2=publico
+  const [filtroProfAgenda, setFiltroProfAgenda] = useState("todos");
+
+  // agenda – form nueva cita
+  const [ncServicioId, setNcServicioId] = useState("");
+  const [ncProfId, setNcProfId] = useState("");
+  const [ncSlot, setNcSlot] = useState(null);
+  const [ncNombre, setNcNombre] = useState("");
+  const [ncCelular, setNcCelular] = useState("");
+  const [guardandoNc, setGuardandoNc] = useState(false);
+
+  // booking público
+  const [modoPublico, setModoPublico] = useState(false);
+  const [pubUid, setPubUid] = useState("");
+  const [pubNegocioNombre, setPubNegocioNombre] = useState("");
+  const [pubServicios, setPubServicios] = useState([]);
+  const [pubProfesionales, setPubProfesionales] = useState([]);
+  const [pubConfig, setPubConfig] = useState({ hora_inicio: "08:00", hora_fin: "18:00", dias_activos: [] });
+  const [pubCitasDia, setPubCitasDia] = useState([]);
+  const [pubCargando, setPubCargando] = useState(false);
+  const [pubStep, setPubStep] = useState(1);
+  const [pubServicioId, setPubServicioId] = useState("");
+  const [pubProfId, setPubProfId] = useState("");
+  const [pubFecha, setPubFecha] = useState(hoy);
+  const [pubSlot, setPubSlot] = useState(null);
+  const [pubNombre, setPubNombre] = useState("");
+  const [pubCelular, setPubCelular] = useState("");
+  const [pubConfirmada, setPubConfirmada] = useState(false);
+  const [pubReservando, setPubReservando] = useState(false);
+  const [pubReglasError, setPubReglasError] = useState(false);
+  const [pubTagline, setPubTagline] = useState("");
+  const [pubLogoUrl, setPubLogoUrl] = useState("");
+
+  // perfil del negocio (dueño)
+  const [perfilNegocio, setPerfilNegocio] = useState({ nombre_comercial: "", tagline: "", logo_url: "" });
+  const [guardandoPerfil, setGuardandoPerfil] = useState(false);
+
+  // ── detectar modo público ──────────────────────────────────────────────────
   useEffect(() => {
-    const desuscribirAuth = onAuthStateChanged(auth, async (user) => {
+    const bid = new URLSearchParams(window.location.search).get("b");
+    if (bid) { setModoPublico(true); setPubUid(bid); }
+  }, []);
+
+  // ── cargar datos públicos cuando se conoce el uid ─────────────────────────
+  useEffect(() => {
+    if (!pubUid) return;
+    const load = async () => {
+      setPubCargando(true);
+      setPubReglasError(false);
+      let errores = 0;
+
+      // Cada fetch es independiente: si falla uno no bloquea los demás
+      try {
+        const s = await getDoc(doc(db, "negocios", pubUid));
+        if (s.exists()) {
+          const d = s.data();
+          setPubNegocioNombre(d.nombre_comercial || "");
+          setPubTagline(d.tagline || "");
+          setPubLogoUrl(d.logo_url || "");
+        }
+      } catch (e) { console.error("Error leyendo negocio:", e); errores++; }
+
+      try {
+        const s = await getDocs(query(collection(db, `negocios/${pubUid}/servicios`), orderBy("nombre")));
+        setPubServicios(s.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Error leyendo servicios (¿Reglas Firestore?):", e); errores++; }
+
+      try {
+        const s = await getDocs(query(collection(db, `negocios/${pubUid}/profesionales`), orderBy("nombre")));
+        setPubProfesionales(s.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) { console.error("Error leyendo profesionales:", e); errores++; }
+
+      try {
+        const s = await getDoc(doc(db, `negocios/${pubUid}/configuracion`, "agenda"));
+        if (s.exists()) setPubConfig(s.data());
+      } catch (e) { console.error("Error leyendo config:", e); errores++; }
+
+      if (errores > 0) setPubReglasError(true);
+      setPubCargando(false);
+    };
+    load();
+  }, [pubUid]);
+
+  // ── cargar citas públicas cuando cambia la fecha del booking ──────────────
+  useEffect(() => {
+    if (!pubUid || !pubFecha) return;
+    getDocs(query(collection(db, `negocios/${pubUid}/citas`), where("fecha","==",pubFecha)))
+      .then(snap => setPubCitasDia(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(console.error);
+  }, [pubUid, pubFecha]);
+
+  // ── suscripciones del propietario ─────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
       setUsuario(user);
-
       if (user) {
-        // 1. Escuchar el estado de activación del negocio en tiempo real (CON CAPTURA DE ERROR)
-        const negocioRef = doc(db, "negocios", user.uid);
-        const desuscribirNegocio = onSnapshot(negocioRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const datos = docSnap.data();
-            setNegocioActivo(datos.activo !== false); 
-          } else {
-            setNegocioActivo(true);
-          }
+        const u1 = onSnapshot(doc(db, "negocios", user.uid), (s) => {
+          const data = s.data() || {};
+          setNegocioActivo(s.exists() ? data.activo !== false : true);
+          setPerfilNegocio({
+            nombre_comercial: data.nombre_comercial || "",
+            tagline: data.tagline || "",
+            logo_url: data.logo_url || ""
+          });
           setCargandoAuth(false);
-        }, (error) => {
-          console.error("Error crítico en regla o lectura de negocio:", error);
-          setNegocioActivo(true); 
-          setCargandoAuth(false);
-        });
+        }, () => { setNegocioActivo(true); setCargandoAuth(false); });
 
-        // 2. Escuchar las métricas financieras del mes
-        const periodo = obtenerPeriodoActual();
-        const metricasRef = doc(db, `negocios/${user.uid}/metricas`, periodo);
-        const desuscribirMetricas = onSnapshot(metricasRef, (docSnap) => {
-          if (docSnap.exists()) {
-            setMetricasMes(docSnap.data());
-          } else {
-            setMetricasMes({ total_ventas: 0, cantidad_transacciones: 0 });
-          }
-        }, (error) => {
-          console.error("Error escuchando métricas:", error);
-        });
+        const u2 = onSnapshot(doc(db, `negocios/${user.uid}/metricas`, periodoActual()), (s) => {
+          setMetricasMes(s.exists() ? s.data() : { total_ventas: 0, cantidad_transacciones: 0 });
+        }, console.error);
+
+        const u3 = onSnapshot(query(collection(db, `negocios/${user.uid}/servicios`), orderBy("nombre")), (s) => {
+          setServicios(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, console.error);
+
+        const u4 = onSnapshot(query(collection(db, `negocios/${user.uid}/profesionales`), orderBy("nombre")), (s) => {
+          setProfesionales(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, console.error);
+
+        const u5 = onSnapshot(doc(db, `negocios/${user.uid}/configuracion`, "agenda"), (s) => {
+          if (s.exists()) setConfigAgenda(s.data());
+        }, console.error);
 
         cargarPrimerasFacturas(user.uid);
-
-        return () => {
-          desuscribirNegocio();
-          desuscribirMetricas();
-        };
-      } else {
-        setCargandoAuth(false);
-      }
+        return () => { u1(); u2(); u3(); u4(); u5(); };
+      } else { setCargandoAuth(false); }
     });
-
-    return () => desuscribirAuth();
+    return () => unsub();
   }, [usuario]);
 
+  // ── cargar citas del día (propietario) ────────────────────────────────────
+  useEffect(() => {
+    if (!usuario || seccionActiva !== "agenda") return;
+    setCargandoCitas(true);
+    setNcSlot(null);
+    getDocs(query(collection(db, `negocios/${usuario.uid}/citas`), where("fecha","==",fechaAgenda)))
+      .then(snap => setCitasDelDia(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+      .catch(console.error)
+      .finally(() => setCargandoCitas(false));
+  }, [usuario, fechaAgenda, seccionActiva]);
+
+  // ── historial ────────────────────────────────────────────────────────────
   const cargarPrimerasFacturas = async (uid) => {
     setCargandoHistorial(true);
     try {
-      const q = query(
-        collection(db, `negocios/${uid}/facturas`),
-        orderBy("fecha_creacion", "desc"),
-        limit(10)
-      );
-      const snapshot = await getDocs(q);
-      
-      if (!snapshot.empty) {
-        const listaDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setFacturas(listaDocs);
-        setUltimoDoc(snapshot.docs[snapshot.docs.length - 1]);
-        setHayMasFacturas(snapshot.docs.length === 10);
-      } else {
-        setFacturas([]);
-        setHayMasFacturas(false);
-      }
-    } catch (error) {
-      console.error("Error cargando historial de facturas:", error);
-    } finally {
-      setCargandoHistorial(false);
-    }
+      const snap = await getDocs(query(collection(db,`negocios/${uid}/facturas`), orderBy("fecha_creacion","desc"), limit(10)));
+      setFacturas(snap.empty ? [] : snap.docs.map(d => ({ id:d.id,...d.data() })));
+      setUltimoDoc(snap.empty ? null : snap.docs[snap.docs.length-1]);
+      setHayMasFacturas(snap.docs.length === 10);
+    } catch(e){ console.error(e); } finally { setCargandoHistorial(false); }
   };
-  
+
   const cargarMasFacturas = async () => {
     if (!usuario || !ultimoDoc || cargandoHistorial) return;
     setCargandoHistorial(true);
     try {
-      const q = query(
-        collection(db, `negocios/${usuario.uid}/facturas`),
-        orderBy("fecha_creacion", "desc"),
-        startAfter(ultimoDoc),
-        limit(10)
-      );
-      const snapshot = await getDocs(q);
-
-      if (!snapshot.empty) {
-        const nuevosDocs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        setFacturas(prev => [...prev, ...nuevosDocs]);
-        setUltimoDoc(snapshot.docs[snapshot.docs.length - 1]);
-        setHayMasFacturas(snapshot.docs.length === 10);
-      } else {
-        setHayMasFacturas(false);
-      }
-    } catch (error) {
-      console.error("Error cargando más facturas:", error);
-    } finally {
-      setCargandoHistorial(false);
-    }
+      const snap = await getDocs(query(collection(db,`negocios/${usuario.uid}/facturas`), orderBy("fecha_creacion","desc"), startAfter(ultimoDoc), limit(10)));
+      if (!snap.empty) {
+        setFacturas(prev => [...prev, ...snap.docs.map(d=>({id:d.id,...d.data()}))]);
+        setUltimoDoc(snap.docs[snap.docs.length-1]);
+        setHayMasFacturas(snap.docs.length === 10);
+      } else { setHayMasFacturas(false); }
+    } catch(e){ console.error(e); } finally { setCargandoHistorial(false); }
   };
-  
+
+  // ── auth ─────────────────────────────────────────────────────────────────
   const ejecutarAuth = async (e) => {
-    e.preventDefault();
-    setProcesandoAccion(true);
+    e.preventDefault(); setProcesandoAccion(true);
     try {
       if (modoRegistro) {
-        const credenciales = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        const { user } = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
         const batch = writeBatch(db);
-        const negocioRef = doc(db, "negocios", credenciales.user.uid);
-        batch.set(negocioRef, { 
-          nombre_comercial: nombreNegocio, 
-          fecha_registro: new Date(), 
-          plan: "Gratuito",
-          activo: true 
-        });
+        batch.set(doc(db,"negocios",user.uid),{ nombre_comercial:nombreNegocio, fecha_registro:new Date(), plan:"Gratuito", activo:true });
         await batch.commit();
         alert("Establecimiento registrado exitosamente.");
-      } else {
-        await signInWithEmailAndPassword(auth, authEmail, authPassword);
-      }
+      } else { await signInWithEmailAndPassword(auth, authEmail, authPassword); }
       setAuthEmail(""); setAuthPassword(""); setNombreNegocio("");
-    } catch (error) {
-      alert("Error de autenticación. Verifique sus credenciales de acceso.");
-    } finally {
-      setProcesandoAccion(false);
-    }
-  };
-  
-  const cerrarSesion = () => {
-    signOut(auth);
-    setMetricasMes({ total_ventas: 0, cantidad_transacciones: 0 });
-    setFacturas([]);
-    setUltimoDoc(null);
-    setSeccionActiva("dashboard");
-    setNegocioActivo(true);
+    } catch { alert("Error de autenticación. Verifique sus credenciales."); }
+    finally { setProcesandoAccion(false); }
   };
 
+  const cerrarSesion = () => {
+    signOut(auth);
+    setMetricasMes({ total_ventas:0, cantidad_transacciones:0 });
+    setFacturas([]); setUltimoDoc(null);
+    setServicios([]); setProfesionales([]); setCitasDelDia([]);
+    setSeccionActiva("dashboard"); setNegocioActivo(true);
+  };
+
+  // ── POS ──────────────────────────────────────────────────────────────────
   const registrarVenta = async (e) => {
     e.preventDefault();
     if (!usuario || !negocioActivo) return;
     setProcesandoAccion(true);
     try {
-      const fechaActual = new Date();
-      const periodoMetricas = obtenerPeriodoActual();
-      const batch = writeBatch(db);
-      const totalPagar = Number(monto);
-      const factorDivisor = 1 + (Number(tarifaIva) / 100);
-      const baseGravable = totalPagar / factorDivisor;
-      const valorIva = totalPagar - baseGravable;
-
-      const nuevaFacturaData = {
+      const total = Number(monto);
+      const base = total / (1 + Number(tarifaIva)/100);
+      const facturaData = {
         tipo_documento: tipoDoc,
-        cliente: {
-          identificacion: identificacion || "Consumidor Final",
-          nombre: nombreCliente || "Cuantías Menores",
-          correo: correoCliente || "N/A",
-          celular: celularCliente || "N/A"
-        },
-        venta: { 
-          concepto, 
-          monto_total: totalPagar, 
-          base_gravable: Number(baseGravable.toFixed(2)),
-          valor_iva: Number(valorIva.toFixed(2)),
-          porcentaje_iva: Number(tarifaIva),
-          metodo_pago: metodoPago 
-        },
-        estado_dian: tipoDoc === "Factura Electrónica" ? "Pendiente" : "No aplica",
-        fecha_creacion: fechaActual
+        cliente: { identificacion: identificacion||"Consumidor Final", nombre: nombreCliente||"Cuantías Menores", correo: correoCliente||"N/A", celular: celularCliente||"N/A" },
+        venta: { concepto, monto_total:total, base_gravable:+base.toFixed(2), valor_iva:+(total-base).toFixed(2), porcentaje_iva:Number(tarifaIva), metodo_pago:metodoPago },
+        estado_dian: tipoDoc==="Factura Electrónica"?"Pendiente":"No aplica",
+        fecha_creacion: new Date()
       };
-      
-      const facturaRef = doc(collection(db, `negocios/${usuario.uid}/facturas`));
-      batch.set(facturaRef, nuevaFacturaData);
-
-      const metricasRef = doc(db, `negocios/${usuario.uid}/metricas`, periodoMetricas);
-      batch.set(metricasRef, {
-        total_ventas: increment(totalPagar),
-        cantidad_transacciones: increment(1),
-        ultima_actualizacion: fechaActual
-      }, { merge: true });
-      
+      const batch = writeBatch(db);
+      const ref = doc(collection(db,`negocios/${usuario.uid}/facturas`));
+      batch.set(ref, facturaData);
+      batch.set(doc(db,`negocios/${usuario.uid}/metricas`,periodoActual()), { total_ventas:increment(total), cantidad_transacciones:increment(1), ultima_actualizacion:new Date() },{ merge:true });
       await batch.commit();
-      
-      setFacturas(prev => [{ id: facturaRef.id, ...nuevaFacturaData }, ...prev]);
-      alert("Registro guardado con éxito en el sistema contable.");
-      
-      // Limpiar todos los campos del formulario tras procesar la venta
-      setIdentificacion(""); 
-      setNombreCliente(""); 
-      setCorreoCliente(""); 
-      setCelularCliente("");
-      setConcepto(""); 
-      setMonto(""); 
-      setTarifaIva("0");
-    } catch (error) {
-      alert("Error al procesar la transacción.");
-    } finally {
-      setProcesandoAccion(false);
-    }
+      setFacturas(prev => [{ id:ref.id,...facturaData },...prev]);
+      alert("Registro guardado con éxito.");
+      setIdentificacion(""); setNombreCliente(""); setCorreoCliente(""); setCelularCliente("");
+      setConcepto(""); setMonto(""); setTarifaIva("0");
+    } catch { alert("Error al procesar la transacción."); }
+    finally { setProcesandoAccion(false); }
   };
-  
-  const descargarPDF = (factura) => {
-    const elemento = document.getElementById(`comprobante-render-${factura.id}`);
-    if (!elemento) return;
-    const opciones = {
-      margin: 15,
-      filename: `Comprobante_${factura.id.substring(0, 8)}.pdf`,
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: "mm", format: "letter", orientation: "portrait" }
-    };
-    elemento.style.display = "block";
-    window.html2pdf().set(opciones).from(elemento).save().then(() => {
-      elemento.style.display = "none";
-    });
-  };
-  
-  // ESTILOS OPTIMIZADOS PARA MÓVIL Y ESCRITORIO
-  const styles = {
-    authContainer: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#f8fafc", fontFamily: "sans-serif", padding: "16px", boxSizing: "border-box" },
-    appLayout: { display: "flex", flexWrap: "wrap", minHeight: "100vh", backgroundColor: "#f8fafc", fontFamily: "sans-serif" },
-    sidebar: { width: "100%", minWidth: "260px", flex: "1 1 260px", backgroundColor: "#0f172a", color: "#ffffff", display: "flex", flexDirection: "column", padding: "24px 16px", boxSizing: "border-box" },
-    logoSection: { fontSize: "22px", fontWeight: "800", marginBottom: "24px", paddingLeft: "12px", letterSpacing: "-0.5px", display: "flex", alignItems: "baseline", gap: "6px" },
-    versionTag: { fontSize: "9px", color: "#475569", fontWeight: "400", letterSpacing: "0px" },
-    
-    menuBtn: (activo) => ({
-      width: "100%", padding: "12px 16px", borderRadius: "6px", border: "none", backgroundColor: activo ? "#1e293b" : "transparent",
-      color: activo ? "#ffffff" : "#94a3b8", textAlign: "left", fontSize: "14px", fontWeight: "600", cursor: "pointer", marginBottom: "8px", transition: "all 0.2s"
-    }),
-    logoutBtn: { width: "100%", padding: "12px 16px", borderRadius: "6px", border: "1px solid #334155", backgroundColor: "transparent", color: "#f1f5f9", fontSize: "13px", fontWeight: "500", cursor: "pointer", marginTop: "16px" },
-    mainContent: { flex: "1 1 300px", padding: "20px", boxSizing: "border-box" },
-    card: { backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", padding: "20px", boxSizing: "border-box" },
-    title: { fontSize: "20px", fontWeight: "700", color: "#0f172a", margin: "0 0 6px 0" },
-    subtitle: { fontSize: "13px", color: "#64748b", margin: "0 0 24px 0" },
-    field: { display: "flex", flexDirection: "column", marginBottom: "14px" },
-    label: { fontSize: "12px", fontWeight: "600", color: "#334155", marginBottom: "6px" },
-    input: { width: "100%", padding: "10px 12px", fontSize: "13px", borderRadius: "6px", border: "1px solid #cbd5e1", boxSizing: "border-box" },
-    row: { display: "flex", flexWrap: "wrap", gap: "16px" },
-    sectionLabel: { fontSize: "11px", fontWeight: "700", color: "#475569", textTransform: "uppercase", margin: "24px 0 12px 0", paddingBottom: "6px", borderBottom: "1px solid #f1f5f9" },
-    btnPrimary: { width: "100%", padding: "12px", fontSize: "13px", fontWeight: "600", color: "#ffffff", border: "none", borderRadius: "6px", cursor: "pointer", marginTop: "10px" },
-    kpiGrid: { display: "flex", flexWrap: "wrap", gap: "16px", marginBottom: "24px" },
-    kpiCard: { flex: "1 1 200px", backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "20px", boxShadow: "0 1px 2px rgba(0,0,0,0.02)" },
-    kpiLabel: { fontSize: "12px", fontWeight: "600", color: "#64748b", textTransform: "uppercase", margin: 0 },
-    kpiValue: { fontSize: "24px", fontWeight: "800", color: "#0f172a", margin: "8px 0 0 0" },
-    table: { width: "100%", borderCollapse: "collapse", fontSize: "13px" },
-    th: { textAlign: "left", padding: "12px", backgroundColor: "#f8fafc", color: "#475569", fontWeight: "600", borderBottom: "1px solid #e2e8f0" },
-    td: { padding: "14px 12px", borderBottom: "1px solid #f1f5f9", color: "#334155" },
-    btnAction: { backgroundColor: "#ffffff", border: "1px solid #cbd5e1", borderRadius: "4px", padding: "6px 12px", fontSize: "11px", fontWeight: "600", color: "#334155", cursor: "pointer", transition: "all 0.1s" }
-  };
-  
-  if (cargandoAuth) {
-    return <div style={styles.authContainer}><p style={{color: "#64748b", fontSize: "14px"}}>Cargando plataforma corporativa...</p></div>;
-  }
 
-  // PANTALLA DE ACCESO NO AUTENTICADO
-  if (!usuario) {
+  const descargarPDF = (f) => {
+    const el = document.getElementById(`cr-${f.id}`);
+    if (!el) return;
+    el.style.display = "block";
+    window.html2pdf().set({ margin:15, filename:`Comprobante_${f.id.substring(0,8)}.pdf`, image:{type:"jpeg",quality:0.98}, html2canvas:{scale:2,useCORS:true}, jsPDF:{unit:"mm",format:"letter",orientation:"portrait"} }).from(el).save().then(()=>{ el.style.display="none"; });
+  };
+
+  // ── catálogo ──────────────────────────────────────────────────────────────
+  const agregarServicio = async (e) => {
+    e.preventDefault(); if (!usuario||!nuevoServicio.nombre.trim()) return;
+    setGuardandoServicio(true);
+    try {
+      await addDoc(collection(db,`negocios/${usuario.uid}/servicios`),{ nombre:nuevoServicio.nombre.trim(), precio:Number(nuevoServicio.precio)||0, duracion:Number(nuevoServicio.duracion)||30, fecha_creacion:new Date() });
+      setNuevoServicio({ nombre:"",precio:"",duracion:"30" });
+    } catch { alert("Error al agregar el servicio."); }
+    finally { setGuardandoServicio(false); }
+  };
+
+  const eliminarServicio = async (id) => {
+    if (!usuario||!window.confirm("¿Eliminar este servicio?")) return;
+    await deleteDoc(doc(db,`negocios/${usuario.uid}/servicios`,id)).catch(()=>alert("Error al eliminar."));
+  };
+
+  // ── profesionales ─────────────────────────────────────────────────────────
+  const agregarProfesional = async (e) => {
+    e.preventDefault(); if (!usuario||!nuevoProfesional.nombre.trim()) return;
+    setGuardandoProfesional(true);
+    try {
+      await addDoc(collection(db,`negocios/${usuario.uid}/profesionales`),{ nombre:nuevoProfesional.nombre.trim(), especialidad:nuevoProfesional.especialidad.trim()||"", fecha_creacion:new Date() });
+      setNuevoProfesional({ nombre:"",especialidad:"" });
+    } catch (e) {
+      console.error("Error al agregar profesional:", e);
+      alert(`Error al agregar el profesional.\n\nCausa: ${e.code || e.message}\n\nSi dice "permission-denied", debe actualizar las Reglas de Firestore en la consola de Firebase.`);
+    }
+    finally { setGuardandoProfesional(false); }
+  };
+
+  const eliminarProfesional = async (id) => {
+    if (!usuario||!window.confirm("¿Eliminar este profesional?")) return;
+    await deleteDoc(doc(db,`negocios/${usuario.uid}/profesionales`,id)).catch(()=>alert("Error al eliminar."));
+  };
+
+  // ── configuración de agenda ───────────────────────────────────────────────
+  const toggleDia = (dia) => setConfigAgenda(p => ({...p, dias_activos: p.dias_activos.includes(dia) ? p.dias_activos.filter(d=>d!==dia) : [...p.dias_activos,dia] }));
+
+  // ── perfil del negocio ────────────────────────────────────────────────────
+  const guardarPerfil = async (e) => {
+    e.preventDefault(); if (!usuario) return;
+    setGuardandoPerfil(true);
+    try {
+      await setDoc(doc(db, "negocios", usuario.uid), {
+        nombre_comercial: perfilNegocio.nombre_comercial.trim(),
+        tagline: perfilNegocio.tagline.trim(),
+        logo_url: perfilNegocio.logo_url.trim()
+      }, { merge: true });
+      alert("Perfil del negocio actualizado.");
+    } catch (e) {
+      alert(`Error al guardar: ${e.code || e.message}`);
+    }
+    finally { setGuardandoPerfil(false); }
+  };
+
+  const guardarConfigAgenda = async (e) => {
+    e.preventDefault(); if (!usuario) return;
+    setGuardandoConfig(true);
+    try {
+      await setDoc(doc(db,`negocios/${usuario.uid}/configuracion`,"agenda"), configAgenda);
+      alert("Configuración guardada.");
+    } catch (e) {
+      console.error("Error al guardar config:", e);
+      alert(`Error al guardar la configuración.\n\nCausa: ${e.code || e.message}\n\nSi dice "permission-denied", debe actualizar las Reglas de Firestore en la consola de Firebase.`);
+    }
+    finally { setGuardandoConfig(false); }
+  };
+
+  // ── agendar cita (propietario) ────────────────────────────────────────────
+  const reservarCitaManual = async () => {
+    if (!usuario||!ncSlot||!ncNombre.trim()) return;
+    const serv = servicios.find(s=>s.id===ncServicioId);
+    const prof = profesionales.find(p=>p.id===ncProfId);
+    setGuardandoNc(true);
+    try {
+      const data = {
+        fecha: fechaAgenda, hora_inicio:ncSlot.horaInicio, hora_fin:ncSlot.horaFin,
+        servicio_id:ncServicioId||"", servicio_nombre:serv?.nombre||"Sin especificar", servicio_duracion:serv?.duracion||30,
+        profesional_id:ncProfId||"", profesional_nombre:prof?.nombre||"Sin asignar",
+        cliente_nombre:ncNombre.trim(), cliente_celular:ncCelular||"N/A",
+        estado:"confirmada", origen:"manual", fecha_creacion:new Date()
+      };
+      const ref = await addDoc(collection(db,`negocios/${usuario.uid}/citas`),data);
+      setCitasDelDia(prev=>[...prev,{ id:ref.id,...data }]);
+      setNcSlot(null); setNcNombre(""); setNcCelular("");
+      setTabAgenda(0);
+    } catch { alert("Error al reservar la cita."); }
+    finally { setGuardandoNc(false); }
+  };
+
+  const cancelarCita = async (citaId) => {
+    if (!usuario||!window.confirm("¿Cancelar esta cita?")) return;
+    try {
+      await setDoc(doc(db,`negocios/${usuario.uid}/citas`,citaId),{ estado:"cancelada" },{ merge:true });
+      setCitasDelDia(prev=>prev.map(c=>c.id===citaId?{...c,estado:"cancelada"}:c));
+    } catch { alert("Error al cancelar."); }
+  };
+
+  // ── confirmar cita pública ────────────────────────────────────────────────
+  const confirmarCitaPublica = async () => {
+    if (!pubSlot||!pubNombre.trim()) return;
+    const serv = pubServicios.find(s=>s.id===pubServicioId);
+    const prof = pubProfesionales.find(p=>p.id===pubProfId);
+    setPubReservando(true);
+    try {
+      await addDoc(collection(db,`negocios/${pubUid}/citas`),{
+        fecha:pubFecha, hora_inicio:pubSlot.horaInicio, hora_fin:pubSlot.horaFin,
+        servicio_id:pubServicioId||"", servicio_nombre:serv?.nombre||"Sin especificar", servicio_duracion:serv?.duracion||30,
+        profesional_id:pubProfId||"", profesional_nombre:prof?.nombre||"Sin asignar",
+        cliente_nombre:pubNombre.trim(), cliente_celular:pubCelular||"N/A",
+        estado:"confirmada", origen:"online", fecha_creacion:new Date()
+      });
+      setPubConfirmada(true);
+    } catch { alert("Error al confirmar. Intente nuevamente."); }
+    finally { setPubReservando(false); }
+  };
+
+  // ── navegar fecha ─────────────────────────────────────────────────────────
+  const moverFecha = (days) => {
+    const d = new Date(fechaAgenda+"T12:00:00");
+    d.setDate(d.getDate()+days);
+    setFechaAgenda(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ESTILOS
+  // ══════════════════════════════════════════════════════════════════════════
+  const S = {
+    page:{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",backgroundColor:"#f8fafc",fontFamily:"system-ui,sans-serif",padding:"16px",boxSizing:"border-box" },
+    layout:{ display:"flex",flexWrap:"wrap",minHeight:"100vh",backgroundColor:"#f8fafc",fontFamily:"system-ui,sans-serif" },
+    sidebar:{ width:"100%",minWidth:"220px",flex:"1 1 220px",backgroundColor:"#0f172a",color:"#fff",display:"flex",flexDirection:"column",padding:"20px 14px",boxSizing:"border-box",gap:"2px" },
+    logo:{ fontSize:"20px",fontWeight:"800",marginBottom:"20px",paddingLeft:"10px",display:"flex",alignItems:"baseline",gap:"5px" },
+    vTag:{ fontSize:"9px",color:"#475569",fontWeight:"400" },
+    mCat:{ fontSize:"10px",fontWeight:"700",color:"#334155",textTransform:"uppercase",padding:"14px 10px 4px",letterSpacing:"0.5px" },
+    mBtn:(a)=>({ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"none",backgroundColor:a?"#1e293b":"transparent",color:a?"#fff":"#94a3b8",textAlign:"left",fontSize:"13px",fontWeight:"600",cursor:"pointer" }),
+    logoutBtn:{ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"1px solid #1e293b",backgroundColor:"transparent",color:"#94a3b8",fontSize:"12px",fontWeight:"500",cursor:"pointer",marginTop:"auto" },
+    main:{ flex:"1 1 320px",padding:"24px 20px",boxSizing:"border-box" },
+    card:{ backgroundColor:"#fff",borderRadius:"10px",border:"1px solid #e2e8f0",boxShadow:"0 1px 3px rgba(0,0,0,0.05)",padding:"20px",boxSizing:"border-box" },
+    h1:{ fontSize:"20px",fontWeight:"700",color:"#0f172a",margin:"0 0 4px 0" },
+    sub:{ fontSize:"13px",color:"#64748b",margin:"0 0 20px 0" },
+    field:{ display:"flex",flexDirection:"column",marginBottom:"14px" },
+    label:{ fontSize:"12px",fontWeight:"600",color:"#334155",marginBottom:"5px" },
+    input:{ width:"100%",padding:"9px 12px",fontSize:"13px",borderRadius:"6px",border:"1px solid #cbd5e1",boxSizing:"border-box" },
+    row:{ display:"flex",flexWrap:"wrap",gap:"14px" },
+    secLabel:{ fontSize:"11px",fontWeight:"700",color:"#475569",textTransform:"uppercase",margin:"20px 0 10px",paddingBottom:"5px",borderBottom:"1px solid #f1f5f9" },
+    btnPrimary:(color="#0f172a")=>({ width:"100%",padding:"11px",fontSize:"13px",fontWeight:"600",color:"#fff",border:"none",borderRadius:"6px",cursor:"pointer",backgroundColor:color,marginTop:"8px" }),
+    btnSecondary:{ padding:"8px 16px",fontSize:"12px",fontWeight:"600",border:"1px solid #cbd5e1",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#475569" },
+    kpiGrid:{ display:"flex",flexWrap:"wrap",gap:"14px",marginBottom:"20px" },
+    kpiCard:{ flex:"1 1 180px",backgroundColor:"#fff",border:"1px solid #e2e8f0",borderRadius:"10px",padding:"18px" },
+    kpiLabel:{ fontSize:"11px",fontWeight:"600",color:"#64748b",textTransform:"uppercase",margin:0 },
+    kpiVal:{ fontSize:"22px",fontWeight:"800",color:"#0f172a",margin:"6px 0 0 0" },
+    table:{ width:"100%",borderCollapse:"collapse",fontSize:"13px" },
+    th:{ textAlign:"left",padding:"11px 12px",backgroundColor:"#f8fafc",color:"#475569",fontWeight:"600",borderBottom:"1px solid #e2e8f0" },
+    td:{ padding:"13px 12px",borderBottom:"1px solid #f1f5f9",color:"#334155",verticalAlign:"middle" },
+    badge:(bg,color)=>({ fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"20px",backgroundColor:bg,color:color }),
+    tag:(bg="#f1f5f9",c="#475569")=>({ fontSize:"12px",fontWeight:"600",padding:"4px 10px",borderRadius:"20px",backgroundColor:bg,color:c }),
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PANTALLA: BOOKING PÚBLICO
+  // ══════════════════════════════════════════════════════════════════════════
+  if (modoPublico) {
+    const PUB = {
+      wrap: { minHeight:"100vh", backgroundColor:"#f1f5f9", fontFamily:"system-ui,sans-serif" },
+      hero: { backgroundColor:"#0f172a", padding:"28px 20px 24px", textAlign:"center" },
+      logoCircle: (url) => url
+        ? { width:"72px",height:"72px",borderRadius:"50%",backgroundImage:`url(${url})`,backgroundSize:"cover",backgroundPosition:"center",margin:"0 auto 12px",border:"3px solid rgba(255,255,255,0.2)" }
+        : { width:"72px",height:"72px",borderRadius:"50%",backgroundColor:"#1e293b",border:"3px solid rgba(255,255,255,0.15)",margin:"0 auto 12px",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"28px",fontWeight:"800",color:"#f59e0b" },
+      negNombre: { fontSize:"22px",fontWeight:"800",color:"#fff",margin:"0 0 4px",letterSpacing:"-0.5px" },
+      tagline: { fontSize:"13px",color:"#94a3b8",margin:0 },
+      steps: { display:"flex",alignItems:"center",justifyContent:"center",gap:"0",padding:"0 20px",margin:"20px 0 0" },
+      stepDot: (done,active) => ({ width:"28px",height:"28px",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:"700",flexShrink:0,backgroundColor:done?"#f59e0b":active?"#fff":"rgba(255,255,255,0.15)",color:done?"#0f172a":active?"#0f172a":"rgba(255,255,255,0.4)" }),
+      stepLine: (done) => ({ flex:1,height:"2px",backgroundColor:done?"#f59e0b":"rgba(255,255,255,0.15)" }),
+      card: { backgroundColor:"#fff",margin:"16px",borderRadius:"16px",padding:"20px",boxShadow:"0 4px 24px rgba(0,0,0,0.08)" },
+      servBtn: (sel) => ({ width:"100%",padding:"14px 16px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":"#e2e8f0"}`,backgroundColor:sel?"#fffbeb":"#fff",cursor:"pointer",textAlign:"left",marginBottom:"8px",transition:"all 0.15s" }),
+      profBtn: (sel) => ({ width:"100%",padding:"12px 14px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":"#e2e8f0"}`,backgroundColor:sel?"#fffbeb":"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:"12px",marginBottom:"8px" }),
+      profAvatar: { width:"40px",height:"40px",borderRadius:"50%",backgroundColor:"#0f172a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"700",fontSize:"16px",flexShrink:0 },
+      slotBtn: (sel,ocu) => ({ padding:"11px 6px",borderRadius:"8px",border:`2px solid ${ocu?"#f1f5f9":sel?"#f59e0b":"#d1fae5"}`,backgroundColor:ocu?"#f8fafc":sel?"#fffbeb":"#f0fdf4",color:ocu?"#cbd5e1":sel?"#b45309":"#065f46",fontWeight:"700",fontSize:"13px",cursor:ocu?"not-allowed":"pointer",textAlign:"center" }),
+      btnPrimary: { width:"100%",padding:"14px",fontSize:"15px",fontWeight:"700",color:"#fff",border:"none",borderRadius:"10px",cursor:"pointer",backgroundColor:"#f59e0b",marginTop:"6px",letterSpacing:"-0.2px" },
+      btnBack: { padding:"8px 14px",fontSize:"12px",fontWeight:"600",border:"1px solid #e2e8f0",borderRadius:"8px",cursor:"pointer",backgroundColor:"transparent",color:"#64748b",marginBottom:"16px" },
+      input: { width:"100%",padding:"12px 14px",fontSize:"14px",borderRadius:"10px",border:"1px solid #e2e8f0",boxSizing:"border-box",marginTop:"5px" },
+      label: { fontSize:"13px",fontWeight:"600",color:"#334155",display:"block",marginBottom:"12px" },
+      footer: { textAlign:"center",padding:"20px",fontSize:"11px",color:"#94a3b8" }
+    };
+
+    const inicial = (pubNegocioNombre||"?")[0].toUpperCase();
+
+    if (pubCargando) return (
+      <div style={{...PUB.wrap,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:"12px"}}>
+        <div style={{width:"40px",height:"40px",borderRadius:"50%",backgroundColor:"#0f172a",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <div style={{width:"20px",height:"20px",border:"3px solid rgba(255,255,255,0.3)",borderTopColor:"#fff",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+        </div>
+        <p style={{color:"#64748b",fontSize:"13px",margin:0}}>Cargando disponibilidad...</p>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+
+    if (pubReglasError && pubServicios.length === 0) return (
+      <div style={{...PUB.wrap,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{maxWidth:"360px",textAlign:"center",padding:"24px"}}>
+          <div style={{fontSize:"48px",marginBottom:"12px"}}>🔒</div>
+          <h2 style={{fontWeight:"800",color:"#0f172a",margin:"0 0 8px"}}>Agenda no disponible</h2>
+          <p style={{color:"#64748b",fontSize:"14px",lineHeight:"1.6"}}>El dueño del negocio debe activar las reservas públicas desde su consola.</p>
+        </div>
+      </div>
+    );
+
+    if (pubConfirmada) {
+      const servConf = pubServicios.find(s=>s.id===pubServicioId);
+      const profConf = pubProfesionales.find(p=>p.id===pubProfId);
+      return (
+        <div style={PUB.wrap}>
+          <div style={PUB.hero}>
+            {pubLogoUrl
+              ? <div style={PUB.logoCircle(pubLogoUrl)}/>
+              : <div style={PUB.logoCircle("")}>{inicial}</div>}
+            <h1 style={PUB.negNombre}>{pubNegocioNombre}</h1>
+          </div>
+          <div style={{...PUB.card,margin:"24px 16px",textAlign:"center"}}>
+            <div style={{width:"64px",height:"64px",borderRadius:"50%",backgroundColor:"#f0fdf4",border:"3px solid #86efac",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"28px",margin:"0 auto 16px"}}>✓</div>
+            <h2 style={{fontWeight:"800",color:"#0f172a",fontSize:"20px",margin:"0 0 6px"}}>¡Cita Confirmada!</h2>
+            <p style={{color:"#64748b",fontSize:"14px",margin:"0 0 20px"}}>Te esperamos. ¡Hasta pronto!</p>
+            <div style={{backgroundColor:"#f8fafc",borderRadius:"10px",padding:"14px",textAlign:"left"}}>
+              {servConf && <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:"14px"}}><span style={{color:"#64748b"}}>Servicio</span><strong>{servConf.nombre}</strong></div>}
+              <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:"14px"}}><span style={{color:"#64748b"}}>Fecha</span><strong style={{textTransform:"capitalize"}}>{fechaLarga(pubFecha)}</strong></div>
+              {pubSlot && <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f1f5f9",fontSize:"14px"}}><span style={{color:"#64748b"}}>Hora</span><strong>{hora12(pubSlot.horaInicio)} – {hora12(pubSlot.horaFin)}</strong></div>}
+              {profConf && <div style={{display:"flex",justifyContent:"space-between",padding:"6px 0",fontSize:"14px"}}><span style={{color:"#64748b"}}>Profesional</span><strong>{profConf.nombre}</strong></div>}
+            </div>
+          </div>
+          <div style={PUB.footer}>Reserva gestionada con Soldi</div>
+        </div>
+      );
+    }
+
+    const pubServSelec = pubServicios.find(s=>s.id===pubServicioId);
+    const pubSlotsDisp = pubServSelec ? generarSlots(pubConfig, pubCitasDia, pubServSelec.duracion) : [];
+    const diaActivoPub = (pubConfig.dias_activos||[]).includes(nombreDia(pubFecha));
+    const totalSteps = pubProfesionales.length > 0 ? 4 : 3;
+    const stepActual = pubProfesionales.length > 0 ? pubStep : pubStep === 1 ? 1 : pubStep - 1;
+
     return (
-      <div style={styles.authContainer}>
-        <div style={{ width: "100%", maxWidth: "480px" }}>
-          <div style={styles.card}>
-            <h2 style={styles.title}>{modoRegistro ? "Crear Cuenta de Establecimiento" : "Control de Acceso Terminal"}</h2>
-            <p style={styles.subtitle}>{modoRegistro ? "Inicialice una infraestructura aislada de datos contables." : "Autentique para habilitar los canales operativos POS."}</p>
-            <form onSubmit={ejecutarAuth}>
-              {modoRegistro && (
-                <div style={styles.field}>
-                  <label style={styles.label}>Nombre de la Razón Social</label>
-                  <input type="text" placeholder="Ej: Distribuidora Central" value={nombreNegocio} onChange={(e) => setNombreNegocio(e.target.value)} style={styles.input} required />
+      <div style={PUB.wrap}>
+        {/* ── HERO ── */}
+        <div style={PUB.hero}>
+          {pubLogoUrl
+            ? <div style={PUB.logoCircle(pubLogoUrl)}/>
+            : <div style={PUB.logoCircle("")}>{inicial}</div>}
+          <h1 style={PUB.negNombre}>{pubNegocioNombre || "Reserva tu cita"}</h1>
+          {pubTagline && <p style={PUB.tagline}>{pubTagline}</p>}
+
+          {/* barra de progreso */}
+          <div style={PUB.steps}>
+            {Array.from({length:totalSteps}).map((_,i)=>{
+              const n=i+1;
+              const done=stepActual>n, active=stepActual===n;
+              return (
+                <div key={i} style={{display:"flex",alignItems:"center",flex:i<totalSteps-1?1:"none"}}>
+                  <div style={PUB.stepDot(done,active)}>{done?"✓":n}</div>
+                  {i<totalSteps-1 && <div style={PUB.stepLine(done)}/>}
                 </div>
-              )}
-              <div style={styles.field}>
-                <label style={styles.label}>Usuario / Correo Electrónico</label>
-                <input type="email" placeholder="admin@negocio.com" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} style={styles.input} required />
-              </div>
-              <div style={styles.field}>
-                <label style={styles.label}>Clave Corporativa de Acceso</label>
-                <input type="password" placeholder="••••••••" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} style={styles.input} required />
-              </div>
-              <button type="submit" disabled={procesandoAccion} style={{...styles.btnPrimary, backgroundColor: "#0f172a"}}>
-                {procesandoAccion ? "Autenticando..." : modoRegistro ? "Completar Registro" : "Iniciar Sesión"}
-              </button>
-            </form>
-            <p style={{textAlign: "center", fontSize: "12px", color: "#64748b", marginTop: "20px", cursor: "pointer", textDecoration: "underline"}} onClick={() => setModoRegistro(!modoRegistro)}>
-              {modoRegistro ? "¿Cuenta existente? Ingrese aquí" : "¿Nuevo establecimiento? Regístrelo aquí"}
-            </p>
+              );
+            })}
           </div>
         </div>
-      </div>
-    );
-  }
 
-  // INTERCEPCIÓN OPERATIVA POR MOROSIDAD / ACCESO SUSPENDIDO
-  if (!negocioActivo) {
-    return (
-      <div style={styles.authContainer}>
-        <div style={{ ...styles.card, maxWidth: "500px", textAlign: "center", border: "1px solid #ef4444" }}>
-          <h2 style={{ ...styles.title, color: "#b91c1c" }}>Acceso Suspendido Temporalmente</h2>
-          <p style={{ ...styles.subtitle, marginTop: "10px", lineHeight: "1.5" }}>
-            Detectamos un pendiente en el pago de la suscripción de su establecimiento. Su infraestructura y registros contables se encuentran a salvo en la red, pero el acceso a la consola operativa ha sido congelado.
-          </p>
-          <p style={{ fontSize: "14px", fontWeight: "600", color: "#334155", margin: "20px 0" }}>
-            Por favor, comuníquese con el administrador del sistema para restablecer el servicio.
-          </p>
-          <button onClick={cerrarSesion} style={{ ...styles.btnPrimary, backgroundColor: "#0f172a" }}>
-            Volver al Inicio / Cambiar de Cuenta
-          </button>
-        </div>
-      </div>
-    );
-  }
+        {/* ── CONTENIDO ── */}
+        <div style={PUB.card}>
 
-  // PANTALLA PRINCIPAL DEL SISTEMA
-  return (
-    <div style={styles.appLayout}>
-      
-      {/* SIDEBAR */}
-      <div style={styles.sidebar}>
-        <div style={styles.logoSection}>
-          Soldi 
-          <span style={styles.versionTag}>1.1</span>
-        </div>
-        
-        <button onClick={() => setSeccionActiva("dashboard")} style={styles.menuBtn(seccionActiva === "dashboard")}>
-          Dashboard Financiero
-        </button>
-        <button onClick={() => setSeccionActiva("registrar")} style={styles.menuBtn(seccionActiva === "registrar")}>
-          Registrar Venta (POS)
-        </button>
-        <button onClick={() => setSeccionActiva("historial")} style={styles.menuBtn(seccionActiva === "historial")}>
-          Histórico de Ventas
-        </button>
-
-        <button onClick={cerrarSesion} style={styles.logoutBtn}>
-          Cerrar Caja Terminal
-        </button>
-      </div>
-
-      {/* CONTENIDO VARIABLE */}
-      <div style={styles.mainContent}>
-        
-        {/* SECCIÓN 1: DASHBOARD */}
-        {seccionActiva === "dashboard" && (
-          <div>
-            <h1 style={styles.title}>Resumen de Operación Comercial</h1>
-            <p style={styles.subtitle}>Métricas consolidadas del periodo de facturación activo.</p>
-            
-            <div style={styles.kpiGrid}>
-              <div style={styles.kpiCard}>
-                <p style={styles.kpiLabel}>Facturación del Mes (Bruto)</p>
-                <h3 style={styles.kpiValue}>
-                  ${Number(metricasMes.total_ventas || 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })}
-                </h3>
-              </div>
-              <div style={styles.kpiCard}>
-                <p style={styles.kpiLabel}>Volumen de Transacciones</p>
-                <h3 style={styles.kpiValue}>{metricasMes.cantidad_transacciones || 0} operaciones</h3>
-              </div>
+          {/* PASO 1: servicio */}
+          {pubStep===1 && (
+            <div>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Qué servicio deseas?</h3>
+              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Elige el servicio que quieres reservar</p>
+              {pubServicios.length===0 && <p style={{color:"#64748b",fontSize:"14px",textAlign:"center",padding:"20px"}}>Este negocio no tiene servicios disponibles aún.</p>}
+              {pubServicios.map(s=>(
+                <button key={s.id} onClick={()=>{ setPubServicioId(s.id); setPubStep(pubProfesionales.length>0?2:3); }} style={PUB.servBtn(pubServicioId===s.id)}>
+                  <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{s.nombre}</div>
+                  <div style={{fontSize:"13px",color:"#64748b",marginTop:"3px",display:"flex",gap:"12px"}}>
+                    <span>⏱ {s.duracion} min</span>
+                    <span>💰 ${Number(s.precio).toLocaleString("es-CO")}</span>
+                  </div>
+                </button>
+              ))}
             </div>
+          )}
 
-            <div style={{...styles.card, textAlign: "center", padding: "40px 20px", backgroundColor: "#f8fafc"}}>
-              <p style={{color: "#475569", fontWeight: "600", margin: 0}}>Terminal de Facturación Conectada</p>
-              <p style={{color: "#64748b", fontSize: "13px", marginTop: "6px"}}>Utilice el menú lateral de navegación para gestionar las operaciones y auditorías del establecimiento.</p>
+          {/* PASO 2: profesional */}
+          {pubStep===2 && (
+            <div>
+              <button onClick={()=>setPubStep(1)} style={PUB.btnBack}>← Atrás</button>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Con quién te atiendes?</h3>
+              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Selecciona tu profesional de confianza</p>
+              <button onClick={()=>{ setPubProfId(""); setPubStep(3); }} style={PUB.profBtn(pubProfId===""&&pubServicioId)}>
+                <div style={{...PUB.profAvatar,backgroundColor:"#475569",fontSize:"20px"}}>✦</div>
+                <div>
+                  <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>Cualquier disponible</div>
+                  <div style={{fontSize:"12px",color:"#64748b"}}>El primero con horario libre</div>
+                </div>
+              </button>
+              {pubProfesionales.map(p=>(
+                <button key={p.id} onClick={()=>{ setPubProfId(p.id); setPubStep(3); }} style={PUB.profBtn(pubProfId===p.id)}>
+                  <div style={PUB.profAvatar}>{p.nombre[0].toUpperCase()}</div>
+                  <div>
+                    <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{p.nombre}</div>
+                    {p.especialidad && <div style={{fontSize:"12px",color:"#64748b"}}>{p.especialidad}</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* PASO 3: fecha y hora */}
+          {pubStep===3 && (
+            <div>
+              <button onClick={()=>setPubStep(pubProfesionales.length>0?2:1)} style={PUB.btnBack}>← Atrás</button>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Cuándo te venimos bien?</h3>
+              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Elige la fecha y el horario que prefieras</p>
+              <label style={PUB.label}>
+                Fecha
+                <input type="date" value={pubFecha} min={hoy()} onChange={e=>{setPubFecha(e.target.value);setPubSlot(null);}} style={PUB.input}/>
+              </label>
+              {!diaActivoPub ? (
+                <div style={{padding:"14px",backgroundColor:"#fff7ed",borderRadius:"10px",color:"#92400e",fontSize:"13px",fontWeight:"600",border:"1px solid #fed7aa"}}>
+                  Cerrado los {nombreDia(pubFecha)} — elige otra fecha
+                </div>
+              ) : pubSlotsDisp.filter(s=>!s.ocupado).length===0 ? (
+                <div style={{padding:"14px",backgroundColor:"#fff7ed",borderRadius:"10px",color:"#92400e",fontSize:"13px",fontWeight:"600",border:"1px solid #fed7aa"}}>
+                  Sin turnos disponibles este día — prueba otra fecha
+                </div>
+              ) : (
+                <div>
+                  <p style={{fontSize:"12px",color:"#64748b",margin:"0 0 10px",fontWeight:"600"}}>TURNOS DISPONIBLES</p>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:"8px"}}>
+                    {pubSlotsDisp.map((sl,i)=>(
+                      <button key={i} disabled={sl.ocupado} onClick={()=>{ if(!sl.ocupado){setPubSlot(sl);setPubStep(4);} }} style={PUB.slotBtn(pubSlot?.horaInicio===sl.horaInicio,sl.ocupado)}>
+                        {hora12(sl.horaInicio)}
+                        {sl.ocupado && <div style={{fontSize:"9px",marginTop:"2px",opacity:0.6}}>Ocupado</div>}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PASO 4: datos del cliente */}
+          {pubStep===4 && (
+            <div>
+              <button onClick={()=>setPubStep(3)} style={PUB.btnBack}>← Atrás</button>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 16px"}}>Casi listo — ¿tus datos?</h3>
+              {/* resumen */}
+              <div style={{backgroundColor:"#fffbeb",border:"1px solid #fde68a",borderRadius:"10px",padding:"12px",marginBottom:"16px",fontSize:"13px"}}>
+                <div style={{fontWeight:"700",color:"#92400e",marginBottom:"4px"}}>Tu cita:</div>
+                <div style={{color:"#78350f"}}>
+                  {pubServSelec?.nombre} · {hora12(pubSlot?.horaInicio||"")} – {hora12(pubSlot?.horaFin||"")}
+                </div>
+                <div style={{color:"#a16207",textTransform:"capitalize"}}>{fechaLarga(pubFecha)}</div>
+                {pubProfId && pubProfesionales.find(p=>p.id===pubProfId) &&
+                  <div style={{color:"#a16207"}}>Con {pubProfesionales.find(p=>p.id===pubProfId).nombre}</div>}
+              </div>
+              <label style={PUB.label}>
+                Tu nombre *
+                <input type="text" placeholder="¿Cómo te llamas?" value={pubNombre} onChange={e=>setPubNombre(e.target.value)} style={PUB.input}/>
+              </label>
+              <label style={PUB.label}>
+                Celular (opcional)
+                <input type="tel" placeholder="3001234567" value={pubCelular} onChange={e=>setPubCelular(e.target.value)} style={PUB.input}/>
+              </label>
+              <button onClick={confirmarCitaPublica} disabled={pubReservando||!pubNombre.trim()} style={{...PUB.btnPrimary,opacity:pubNombre.trim()?1:0.45,marginTop:"8px"}}>
+                {pubReservando ? "Confirmando..." : "Confirmar mi cita"}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div style={PUB.footer}>Reserva gestionada con <strong>Soldi</strong></div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PANTALLAS DE ESTADO (cargando / login / suspendido)
+  // ══════════════════════════════════════════════════════════════════════════
+  if (cargandoAuth) return <div style={S.page}><p style={{color:"#64748b"}}>Cargando...</p></div>;
+
+  if (!usuario) return (
+    <div style={S.page}>
+      <div style={{width:"100%",maxWidth:"420px"}}>
+        <div style={S.card}>
+          <h2 style={S.h1}>{modoRegistro?"Crear Cuenta":"Iniciar Sesión"}</h2>
+          <p style={S.sub}>{modoRegistro?"Registre su establecimiento en Soldi.":"Ingrese a su consola operativa."}</p>
+          <form onSubmit={ejecutarAuth}>
+            {modoRegistro&&<div style={S.field}><label style={S.label}>Nombre del Negocio</label><input type="text" placeholder="Ej: Barbería El Estilo" value={nombreNegocio} onChange={e=>setNombreNegocio(e.target.value)} style={S.input} required/></div>}
+            <div style={S.field}><label style={S.label}>Correo Electrónico</label><input type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} style={S.input} required/></div>
+            <div style={S.field}><label style={S.label}>Contraseña</label><input type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} style={S.input} required/></div>
+            <button type="submit" disabled={procesandoAccion} style={S.btnPrimary()}>{procesandoAccion?"...":modoRegistro?"Registrarme":"Ingresar"}</button>
+          </form>
+          <p style={{textAlign:"center",fontSize:"12px",color:"#64748b",marginTop:"16px",cursor:"pointer",textDecoration:"underline"}} onClick={()=>setModoRegistro(!modoRegistro)}>
+            {modoRegistro?"¿Ya tienes cuenta? Ingresa aquí":"¿Nuevo negocio? Regístralo aquí"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!negocioActivo) return (
+    <div style={S.page}>
+      <div style={{...S.card,maxWidth:"440px",textAlign:"center",border:"1px solid #ef4444"}}>
+        <h2 style={{...S.h1,color:"#b91c1c"}}>Acceso Suspendido</h2>
+        <p style={{...S.sub,marginTop:"8px"}}>Su suscripción tiene un pendiente de pago. Comuníquese con el administrador.</p>
+        <button onClick={cerrarSesion} style={S.btnPrimary()}>Cambiar de Cuenta</button>
+      </div>
+    </div>
+  );
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VARIABLES DERIVADAS (agenda)
+  // ══════════════════════════════════════════════════════════════════════════
+  const diaActivo = (configAgenda.dias_activos||[]).includes(nombreDia(fechaAgenda));
+  const ncServ = servicios.find(s=>s.id===ncServicioId);
+  const slotsNuevaCita = ncServ && diaActivo ? generarSlots(configAgenda, citasDelDia, ncServ.duracion) : [];
+  const citasConfirmadas = citasDelDia
+    .filter(c=>c.estado!=="cancelada")
+    .filter(c=>filtroProfAgenda==="todos"||c.profesional_id===filtroProfAgenda)
+    .sort((a,b)=>a.hora_inicio.localeCompare(b.hora_inicio));
+  const urlPublica = `${window.location.origin}${window.location.pathname}?b=${usuario.uid}`;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // RENDER PRINCIPAL
+  // ══════════════════════════════════════════════════════════════════════════
+  return (
+    <div style={S.layout}>
+
+      {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
+      <div style={S.sidebar}>
+        <div style={S.logo}>Soldi <span style={S.vTag}>1.2</span></div>
+
+        <p style={S.mCat}>Ventas</p>
+        <button style={S.mBtn(seccionActiva==="dashboard")} onClick={()=>setSeccionActiva("dashboard")}>Dashboard</button>
+        <button style={S.mBtn(seccionActiva==="registrar")} onClick={()=>setSeccionActiva("registrar")}>Registrar Venta</button>
+        <button style={S.mBtn(seccionActiva==="historial")} onClick={()=>setSeccionActiva("historial")}>Historial de Ventas</button>
+
+        <p style={S.mCat}>Agenda</p>
+        <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>{ setSeccionActiva("agenda"); setTabAgenda(0); }}>Agenda de Citas</button>
+        <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>setSeccionActiva("servicios")}>Catálogo de Servicios</button>
+        <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>setSeccionActiva("profesionales")}>Profesionales</button>
+
+        <p style={S.mCat}>Ajustes</p>
+        <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>setSeccionActiva("perfil")}>Perfil del Negocio</button>
+        <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>
+
+        <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>
+      </div>
+
+      {/* ── CONTENIDO ───────────────────────────────────────────────────── */}
+      <div style={S.main}>
+
+        {/* ─── DASHBOARD ─────────────────────────────────────────────────── */}
+        {seccionActiva==="dashboard" && (
+          <div>
+            <h1 style={S.h1}>Dashboard</h1>
+            <p style={S.sub}>Resumen del periodo de facturación activo.</p>
+            <div style={S.kpiGrid}>
+              <div style={S.kpiCard}><p style={S.kpiLabel}>Facturación del Mes</p><h3 style={S.kpiVal}>${Number(metricasMes.total_ventas||0).toLocaleString("es-CO",{minimumFractionDigits:2})}</h3></div>
+              <div style={S.kpiCard}><p style={S.kpiLabel}>Transacciones</p><h3 style={S.kpiVal}>{metricasMes.cantidad_transacciones||0}</h3></div>
             </div>
           </div>
         )}
 
-        {/* SECCIÓN 2: REGISTRAR VENTA */}
-        {seccionActiva === "registrar" && (
-          <div style={{maxWidth: "580px"}}>
-            <div style={styles.card}>
-              <h2 style={styles.title}>Emisión de Documento Comercial</h2>
-              <p style={styles.subtitle}>Estructuración de comprobantes internos o facturas electrónicas de venta.</p>
-              
+        {/* ─── POS ────────────────────────────────────────────────────────── */}
+        {seccionActiva==="registrar" && (
+          <div style={{maxWidth:"560px"}}>
+            <div style={S.card}>
+              <h2 style={S.h1}>Registrar Venta</h2>
+              <p style={S.sub}>Emita recibos internos o facturas electrónicas de venta.</p>
               <form onSubmit={registrarVenta}>
-                <div style={styles.field}>
-                  <label style={styles.label}>Tipo de Comprobante</label>
-                  <select value={tipoDoc} onChange={(e) => setTipoDoc(e.target.value)} style={{...styles.input, backgroundColor: "#f8fafc", fontWeight: "600"}}>
-                    <option value="Recibo Interno">Comprobante de Venta Interno (No Contribuyente)</option>
-                    <option value="Factura Electrónica">Factura Electrónica de Venta (DIAN)</option>
+                <div style={S.field}><label style={S.label}>Tipo de Documento</label>
+                  <select value={tipoDoc} onChange={e=>setTipoDoc(e.target.value)} style={{...S.input,fontWeight:"600",backgroundColor:"#f8fafc"}}>
+                    <option value="Recibo Interno">Recibo Interno</option>
+                    <option value="Factura Electrónica">Factura Electrónica (DIAN)</option>
                   </select>
                 </div>
-
-                <div style={styles.sectionLabel}>Información del Adquirente</div>
-                <div style={styles.row}>
-                  <div style={{...styles.field, flex: 1}}><label style={styles.label}>Número de Identificación</label><input type="text" placeholder="NIT o Cédula" value={identificacion} onChange={(e) => setIdentificacion(e.target.value)} style={styles.input} required={tipoDoc === "Factura Electrónica"} /></div>
-                  <div style={{...styles.field, flex: 1}}><label style={styles.label}>Razón Social / Nombre Completo</label><input type="text" placeholder="Nombre del adquirente" value={nombreCliente} onChange={(e) => setNombreCliente(e.target.value)} style={styles.input} required={tipoDoc === "Factura Electrónica"} /></div>
+                <div style={S.secLabel}>Datos del Cliente</div>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Identificación</label><input type="text" placeholder="NIT o Cédula" value={identificacion} onChange={e=>setIdentificacion(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Nombre</label><input type="text" placeholder="Nombre completo" value={nombreCliente} onChange={e=>setNombreCliente(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
                 </div>
-                
-                {/* NUEVO: Campo de Correo y Celular agrupados */}
-                <div style={styles.row}>
-                  <div style={{...styles.field, flex: 1}}>
-                    <label style={styles.label}>Correo de Notificación</label>
-                    <input type="email" placeholder="cliente@correo.com" value={correoCliente} onChange={(e) => setCorreoCliente(e.target.value)} style={styles.input} required={tipoDoc === "Factura Electrónica"} />
-                  </div>
-                  <div style={{...styles.field, flex: 1}}>
-                    <label style={styles.label}>Celular (Opcional)</label>
-                    <input type="tel" placeholder="Ej: 3001234567" value={celularCliente} onChange={(e) => setCelularCliente(e.target.value)} style={styles.input} />
-                  </div>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Correo</label><input type="email" placeholder="cliente@correo.com" value={correoCliente} onChange={e=>setCorreoCliente(e.target.value)} style={S.input} required={tipoDoc==="Factura Electrónica"}/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Celular</label><input type="tel" placeholder="3001234567" value={celularCliente} onChange={e=>setCelularCliente(e.target.value)} style={S.input}/></div>
                 </div>
-
-                <div style={styles.sectionLabel}>Desglose Financiero e Impuestos</div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Concepto Comercial</label>
-                  <input type="text" placeholder="Detalle del servicio o bien suministrado" value={concepto} onChange={(e) => setConcepto(e.target.value)} style={styles.input} required />
-                </div>
-                <div style={styles.row}>
-                  <div style={{...styles.field, flex: 1}}><label style={styles.label}>Precio Venta Público ($)</label><input type="number" placeholder="0.00" value={monto} onChange={(e) => setMonto(e.target.value)} style={styles.input} required /></div>
-                  
-                  <div style={{...styles.field, flex: 1}}>
-                    <label style={styles.label}>Clasificación Tributaria (IVA)</label>
-                    <select value={tarifaIva} onChange={(e) => setTarifaIva(e.target.value)} style={styles.input}>
-                      <option value="0">Exento / Excluido (0%)</option>
-                      <option value="19">Tarifa General (19%)</option>
-                      <option value="5">Tarifa Especial (5%)</option>
+                <div style={S.secLabel}>Detalle del Cobro</div>
+                <div style={S.field}><label style={S.label}>Concepto / Servicio</label><input type="text" placeholder="Ej: Corte de cabello" value={concepto} onChange={e=>setConcepto(e.target.value)} style={S.input} required/></div>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Valor ($)</label><input type="number" placeholder="0" value={monto} onChange={e=>setMonto(e.target.value)} style={S.input} required/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>IVA</label>
+                    <select value={tarifaIva} onChange={e=>setTarifaIva(e.target.value)} style={S.input}>
+                      <option value="0">Exento (0%)</option><option value="19">General (19%)</option><option value="5">Especial (5%)</option>
                     </select>
                   </div>
                 </div>
-                <div style={styles.field}>
-                  <label style={styles.label}>Canal de Pago Homologado</label>
-                  <select value={metodoPago} onChange={(e) => setMetodoPago(e.target.value)} style={styles.input}>
-                    <option value="Efectivo">Efectivo</option><option value="Nequi">Nequi</option><option value="Daviplata">Daviplata</option><option value="Bancolombia">Transferencia</option><option value="Tarjeta">Tarjeta Bancaria</option>
+                <div style={S.field}><label style={S.label}>Método de Pago</label>
+                  <select value={metodoPago} onChange={e=>setMetodoPago(e.target.value)} style={S.input}>
+                    <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option value="Bancolombia">Transferencia</option><option>Tarjeta</option>
                   </select>
                 </div>
-
-                <button type="submit" disabled={procesandoAccion} style={{...styles.btnPrimary, backgroundColor: tipoDoc === "Factura Electrónica" ? "#0284c7" : "#0f172a"}}>
-                  {procesandoAccion ? "Sincronizando Base de Datos..." : "Procesar y Emitir Documento"}
+                <button type="submit" disabled={procesandoAccion} style={S.btnPrimary(tipoDoc==="Factura Electrónica"?"#0284c7":"#0f172a")}>
+                  {procesandoAccion?"Procesando...":"Emitir Documento"}
                 </button>
               </form>
             </div>
           </div>
         )}
 
-        {/* SECCIÓN 3: HISTÓRICO DE VENTAS */}
-        {seccionActiva === "historial" && (
-          <div style={styles.card}>
-            <h1 style={styles.title}>Historial de Transacciones Consolidadas</h1>
-            <p style={styles.subtitle}>Registro y auditoría cronológica de comprobantes emitidos en el establecimiento.</p>
-            
-            {facturas.length === 0 ? (
-              <p style={{fontSize: "13px", color: "#64748b", textAlign: "center", padding: "24px 0"}}>No se registran operaciones previas en este establecimiento.</p>
-            ) : (
+        {/* ─── HISTORIAL ──────────────────────────────────────────────────── */}
+        {seccionActiva==="historial" && (
+          <div style={S.card}>
+            <h1 style={S.h1}>Historial de Ventas</h1>
+            <p style={S.sub}>Comprobantes emitidos en el establecimiento.</p>
+            {facturas.length===0 ? <p style={{color:"#64748b",fontSize:"13px",textAlign:"center",padding:"24px"}}>No hay transacciones registradas.</p> : (
               <>
-                <div style={{ width: "100%", overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>Concepto Comercial</th>
-                        <th style={styles.th}>Adquirente</th>
-                        <th style={styles.th}>Medio</th>
-                        <th style={{...styles.th, textAlign: "right", paddingRight: "12px"}}>Monto Total</th>
-                        <th style={{...styles.th, textAlign: "center"}}>Acciones</th>
-                      </tr>
-                    </thead>
+                <div style={{overflowX:"auto"}}>
+                  <table style={S.table}>
+                    <thead><tr><th style={S.th}>Concepto</th><th style={S.th}>Cliente</th><th style={S.th}>Pago</th><th style={{...S.th,textAlign:"right"}}>Total</th><th style={{...S.th,textAlign:"center"}}>PDF</th></tr></thead>
                     <tbody>
-                      {facturas.map((factura) => (
-                        <tr key={factura.id}>
-                          <td style={styles.td}>
-                            <div style={{fontWeight: "600", color: "#0f172a"}}>{factura.venta.concepto}</div>
-                            <span style={{
-                              fontSize: "11px", fontWeight: "600", padding: "2px 6px", borderRadius: "4px",
-                              backgroundColor: factura.tipo_documento === "Factura Electrónica" ? "#e0f2fe" : "#f1f5f9",
-                              color: factura.tipo_documento === "Factura Electrónica" ? "#0369a1" : "#475569"
-                            }}>
-                              {factura.tipo_documento === "Factura Electrónica" ? "Factura Electrónica" : "Recibo Interno"}
-                            </span>
+                      {facturas.map(f=>(
+                        <tr key={f.id}>
+                          <td style={S.td}>
+                            <div style={{fontWeight:"600"}}>{f.venta.concepto}</div>
+                            <span style={S.badge(f.tipo_documento==="Factura Electrónica"?"#e0f2fe":"#f1f5f9", f.tipo_documento==="Factura Electrónica"?"#0369a1":"#475569")}>{f.tipo_documento==="Factura Electrónica"?"FE":"RI"}</span>
                           </td>
-                          <td style={styles.td}>
-                            <div style={{fontWeight: "500"}}>{factura.cliente.nombre}</div>
-                            <div style={{fontSize: "11px", color: "#64748b"}}>{factura.cliente.identificacion}</div>
-                          </td>
-                          <td style={styles.td}>
-                            <span style={{fontSize: "12px", backgroundColor: "#f1f5f9", padding: "4px 8px", borderRadius: "4px"}}>
-                              {factura.venta.metodo_pago}
-                            </span>
-                          </td>
-                          <td style={{...styles.td, textAlign: "right", fontWeight: "700", color: "#0f172a", fontSize: "14px"}}>
-                            ${Number(factura.venta.monto_total).toLocaleString("es-CO")}
-                          </td>
-                          <td style={{...styles.td, textAlign: "center"}}>
-                            <button 
-                              onClick={() => descargarPDF(factura)}
-                              style={styles.btnAction}
-                            >
-                              Descargar PDF
-                            </button>
-
-                            {/* PLANTILLA DE COMPROBANTE OCULTA */}
-                            <div 
-                              id={`comprobante-render-${factura.id}`} 
-                              style={{ 
-                                display: "none", 
-                                fontFamily: "sans-serif", 
-                                color: "#0f172a", 
-                                padding: "20px",
-                                backgroundColor: "#ffffff"
-                              }}
-                            >
-                              <div style={{ borderBottom: "2px solid #0f172a", paddingBottom: "15px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <div>
-                                  <h1 style={{ fontSize: "24px", fontWeight: "800", margin: 0, color: "#0f172a" }}>SOLDI</h1>
-                                  <p style={{ fontSize: "12px", color: "#64748b", margin: "2px 0 0 0" }}>Plataforma de Control Comercial</p>
-                                </div>
-                                <div style={{ textAlign: "right" }}>
-                                  <h2 style={{ fontSize: "14px", fontWeight: "700", margin: 0, color: "#475569" }}>{factura.tipo_documento.toUpperCase()}</h2>
-                                  <p style={{ fontSize: "11px", color: "#64748b", margin: "2px 0 0 0" }}>ID: {factura.id.toUpperCase()}</p>
-                                </div>
+                          <td style={S.td}><div style={{fontWeight:"500"}}>{f.cliente.nombre}</div><div style={{fontSize:"11px",color:"#94a3b8"}}>{f.cliente.identificacion}</div></td>
+                          <td style={S.td}><span style={S.tag()}>{f.venta.metodo_pago}</span></td>
+                          <td style={{...S.td,textAlign:"right",fontWeight:"700"}}>${Number(f.venta.monto_total).toLocaleString("es-CO")}</td>
+                          <td style={{...S.td,textAlign:"center"}}>
+                            <button onClick={()=>descargarPDF(f)} style={{...S.btnSecondary,fontSize:"11px",padding:"5px 10px"}}>Descargar</button>
+                            <div id={`cr-${f.id}`} style={{display:"none",fontFamily:"sans-serif",color:"#0f172a",padding:"20px",backgroundColor:"#fff"}}>
+                              <div style={{borderBottom:"2px solid #0f172a",paddingBottom:"12px",marginBottom:"16px",display:"flex",justifyContent:"space-between"}}>
+                                <div><h1 style={{fontSize:"22px",fontWeight:"800",margin:0}}>SOLDI</h1><p style={{fontSize:"11px",color:"#64748b",margin:"2px 0 0"}}>Plataforma Comercial</p></div>
+                                <div style={{textAlign:"right"}}><h2 style={{fontSize:"13px",fontWeight:"700",margin:0,color:"#475569"}}>{f.tipo_documento.toUpperCase()}</h2><p style={{fontSize:"10px",color:"#64748b",margin:"2px 0 0"}}>ID: {f.id.toUpperCase()}</p></div>
                               </div>
-
-                              <div style={{ marginBottom: "25px", display: "flex", gap: "40px" }}>
-                                <div style={{ flex: 1 }}>
-                                  <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Información del Adquirente</h3>
-                                  <p style={{ fontSize: "13px", fontWeight: "700", margin: "0 0 2px 0" }}>{factura.cliente.nombre}</p>
-                                  <p style={{ fontSize: "12px", margin: "0 0 2px 0" }}>NIT/Cédula: {factura.cliente.identificacion}</p>
-                                  <p style={{ fontSize: "12px", margin: 0 }}>
-                                    Correo: {factura.cliente.correo} 
-                                    {factura.cliente.celular && factura.cliente.celular !== "N/A" ? ` | Tel: ${factura.cliente.celular}` : ""}
-                                  </p>
-
-                                </div>
-                                <div style={{ flex: 1 }}>
-                                  <h3 style={{ fontSize: "11px", textTransform: "uppercase", color: "#64748b", margin: "0 0 6px 0", borderBottom: "1px solid #e2e8f0", paddingBottom: "4px" }}>Detalles de la Transacción</h3>
-                                  <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Fecha de Emisión:</strong> {factura.fecha_creacion?.seconds ? new Date(factura.fecha_creacion.seconds * 1000).toLocaleString("es-CO") : new Date().toLocaleString("es-CO")}</p>
-                                  <p style={{ fontSize: "12px", margin: "0 0 4px 0" }}><strong>Canal de Liquidación:</strong> {factura.venta.metodo_pago}</p>
-                                  <p style={{ fontSize: "12px", margin: 0 }}><strong>Estado DIAN:</strong> {factura.estado_dian}</p>
-                                </div>
+                              <div style={{display:"flex",gap:"30px",marginBottom:"20px"}}>
+                                <div style={{flex:1}}><p style={{fontSize:"11px",color:"#64748b",textTransform:"uppercase",marginBottom:"4px"}}>Cliente</p><p style={{fontWeight:"700",margin:"0 0 2px"}}>{f.cliente.nombre}</p><p style={{fontSize:"12px",margin:0}}>CC/NIT: {f.cliente.identificacion}</p><p style={{fontSize:"12px",margin:0}}>{f.cliente.correo}{f.cliente.celular&&f.cliente.celular!=="N/A"?` · ${f.cliente.celular}`:""}</p></div>
+                                <div style={{flex:1}}><p style={{fontSize:"11px",color:"#64748b",textTransform:"uppercase",marginBottom:"4px"}}>Transacción</p><p style={{fontSize:"12px",margin:"0 0 3px"}}><strong>Fecha:</strong> {f.fecha_creacion?.seconds?new Date(f.fecha_creacion.seconds*1000).toLocaleString("es-CO"):new Date().toLocaleString("es-CO")}</p><p style={{fontSize:"12px",margin:"0 0 3px"}}><strong>Pago:</strong> {f.venta.metodo_pago}</p><p style={{fontSize:"12px",margin:0}}><strong>DIAN:</strong> {f.estado_dian}</p></div>
                               </div>
-
-                              <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "20px" }}>
-                                <thead>
-                                  <tr>
-                                    <th style={{ textAlign: "left", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Concepto / Descripción</th>
-                                    <th style={{ textAlign: "center", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1" }}>Tarifa IVA</th>
-                                    <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Base Gravable</th>
-                                    <th style={{ textAlign: "right", padding: "10px", backgroundColor: "#f8fafc", fontSize: "12px", fontWeight: "700", borderBottom: "2px solid #cbd5e1", width: "120px" }}>Valor Total</th>
-                                  </tr>
-                                </thead>
+                              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                                <thead><tr><th style={{textAlign:"left",padding:"8px",backgroundColor:"#f8fafc",fontSize:"11px",fontWeight:"700",borderBottom:"2px solid #cbd5e1"}}>Concepto</th><th style={{textAlign:"center",padding:"8px",backgroundColor:"#f8fafc",fontSize:"11px",fontWeight:"700",borderBottom:"2px solid #cbd5e1"}}>IVA</th><th style={{textAlign:"right",padding:"8px",backgroundColor:"#f8fafc",fontSize:"11px",fontWeight:"700",borderBottom:"2px solid #cbd5e1",width:"110px"}}>Base</th><th style={{textAlign:"right",padding:"8px",backgroundColor:"#f8fafc",fontSize:"11px",fontWeight:"700",borderBottom:"2px solid #cbd5e1",width:"110px"}}>Total</th></tr></thead>
                                 <tbody>
-                                  <tr>
-                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", color: "#334155" }}>{factura.venta.concepto}</td>
-                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "center" }}>{factura.venta.porcentaje_iva ?? 0}%</td>
-                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                    <td style={{ padding: "12px 10px", fontSize: "13px", borderBottom: "1px solid #e2e8f0", textAlign: "right", fontWeight: "600" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                  </tr>
-                                  <tr>
-                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b" }}>Subtotal Neto (Base):</td>
-                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600" }}>${Number(factura.venta.base_gravable ?? factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                  </tr>
-                                  <tr>
-                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>Impuesto Liquidado (IVA):</td>
-                                    <td colSpan="2" style={{ padding: "6px 10px", textAlign: "right", fontSize: "12px", fontWeight: "600", borderBottom: "1px solid #e2e8f0" }}>${Number(factura.venta.valor_iva ?? 0).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                  </tr>
-                                  <tr>
-                                    <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "700", fontSize: "13px" }}>Monto Total Recibido:</td>
-                                    <td colSpan="2" style={{ padding: "15px 10px", textAlign: "right", fontWeight: "800", fontSize: "16px", color: "#0f172a" }}>${Number(factura.venta.monto_total).toLocaleString("es-CO", { minimumFractionDigits: 2 })}</td>
-                                  </tr>
+                                  <tr><td style={{padding:"10px 8px",fontSize:"12px",borderBottom:"1px solid #e2e8f0"}}>{f.venta.concepto}</td><td style={{padding:"10px 8px",fontSize:"12px",borderBottom:"1px solid #e2e8f0",textAlign:"center"}}>{f.venta.porcentaje_iva??0}%</td><td style={{padding:"10px 8px",fontSize:"12px",borderBottom:"1px solid #e2e8f0",textAlign:"right"}}>${Number(f.venta.base_gravable??f.venta.monto_total).toLocaleString("es-CO",{minimumFractionDigits:2})}</td><td style={{padding:"10px 8px",fontSize:"12px",borderBottom:"1px solid #e2e8f0",textAlign:"right",fontWeight:"600"}}>${Number(f.venta.monto_total).toLocaleString("es-CO",{minimumFractionDigits:2})}</td></tr>
+                                  <tr><td colSpan="2" style={{padding:"5px 8px",textAlign:"right",fontSize:"11px",color:"#64748b"}}>IVA:</td><td colSpan="2" style={{padding:"5px 8px",textAlign:"right",fontSize:"11px",fontWeight:"600"}}>${Number(f.venta.valor_iva??0).toLocaleString("es-CO",{minimumFractionDigits:2})}</td></tr>
+                                  <tr><td colSpan="2" style={{padding:"12px 8px",textAlign:"right",fontWeight:"700",fontSize:"12px"}}>TOTAL:</td><td colSpan="2" style={{padding:"12px 8px",textAlign:"right",fontWeight:"800",fontSize:"15px"}}>${Number(f.venta.monto_total).toLocaleString("es-CO",{minimumFractionDigits:2})}</td></tr>
                                 </tbody>
                               </table>
-
-                              <div style={{ marginTop: "50px", textAlign: "center", borderTop: "1px dashed #cbd5e1", paddingTop: "15px" }}>
-                                <p style={{ fontSize: "11px", color: "#64748b", margin: 0 }}>Este documento constituye un soporte contable digital emitido de forma válida.</p>
-                                <p style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px" }}>Generado automáticamente por la infraestructura de red de Soldi v1.1.</p>
-                              </div>
+                              <div style={{marginTop:"40px",textAlign:"center",borderTop:"1px dashed #cbd5e1",paddingTop:"12px"}}><p style={{fontSize:"10px",color:"#94a3b8",margin:0}}>Generado por Soldi v1.2</p></div>
                             </div>
-
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-
-                {hayMasFacturas && (
-                  <button 
-                    onClick={cargarMasFacturas} 
-                    disabled={cargandoHistorial}
-                    style={{
-                      width: "100%", backgroundColor: "#ffffff", border: "1px solid #cbd5e1", padding: "12px",
-                      borderRadius: "6px", fontSize: "12px", color: "#475569", fontWeight: "600", cursor: "pointer", marginTop: "20px"
-                    }}
-                  >
-                    {cargandoHistorial ? "Consultando base de datos..." : "Cargar registros históricos adicionales"}
-                  </button>
-                )}
+                {hayMasFacturas&&<button onClick={cargarMasFacturas} disabled={cargandoHistorial} style={{width:"100%",marginTop:"16px",padding:"10px",borderRadius:"6px",border:"1px solid #cbd5e1",backgroundColor:"#fff",fontSize:"12px",color:"#475569",fontWeight:"600",cursor:"pointer"}}>{cargandoHistorial?"Cargando...":"Ver más registros"}</button>}
               </>
             )}
+          </div>
+        )}
+
+        {/* ─── AGENDA DE CITAS ────────────────────────────────────────────── */}
+        {seccionActiva==="agenda" && (
+          <div>
+            <h1 style={S.h1}>Agenda de Citas</h1>
+            <p style={S.sub}>Gestione la disponibilidad y reservas del establecimiento.</p>
+
+            {/* tabs */}
+            <div style={{display:"flex",gap:"4px",backgroundColor:"#f1f5f9",padding:"4px",borderRadius:"8px",marginBottom:"20px",width:"fit-content"}}>
+              {[["Ver Citas",0],["Nueva Cita",1],["Enlace Público",2]].map(([label,idx])=>(
+                <button key={idx} onClick={()=>setTabAgenda(idx)} style={{padding:"8px 18px",borderRadius:"6px",border:"none",fontWeight:"600",fontSize:"13px",cursor:"pointer",backgroundColor:tabAgenda===idx?"#0f172a":"transparent",color:tabAgenda===idx?"#fff":"#64748b"}}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* TAB 0: VER CITAS */}
+            {tabAgenda===0 && (
+              <div>
+                {/* navegación de fecha */}
+                <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"16px",flexWrap:"wrap"}}>
+                  <button onClick={()=>moverFecha(-1)} style={S.btnSecondary}>← Anterior</button>
+                  <span style={{fontWeight:"700",fontSize:"15px",color:"#0f172a",flex:1,textAlign:"center",textTransform:"capitalize"}}>{fechaLarga(fechaAgenda)}</span>
+                  <button onClick={()=>moverFecha(1)} style={S.btnSecondary}>Siguiente →</button>
+                </div>
+
+                {/* filtro por profesional */}
+                {profesionales.length>0 && (
+                  <div style={{display:"flex",gap:"6px",flexWrap:"wrap",marginBottom:"16px"}}>
+                    <button onClick={()=>setFiltroProfAgenda("todos")} style={{padding:"6px 12px",borderRadius:"20px",border:"1px solid",fontWeight:"600",fontSize:"12px",cursor:"pointer",backgroundColor:filtroProfAgenda==="todos"?"#0f172a":"#fff",color:filtroProfAgenda==="todos"?"#fff":"#64748b",borderColor:filtroProfAgenda==="todos"?"#0f172a":"#cbd5e1"}}>Todos</button>
+                    {profesionales.map(p=>(
+                      <button key={p.id} onClick={()=>setFiltroProfAgenda(filtroProfAgenda===p.id?"todos":p.id)} style={{padding:"6px 12px",borderRadius:"20px",border:"1px solid",fontWeight:"600",fontSize:"12px",cursor:"pointer",backgroundColor:filtroProfAgenda===p.id?"#0f172a":"#fff",color:filtroProfAgenda===p.id?"#fff":"#64748b",borderColor:filtroProfAgenda===p.id?"#0f172a":"#cbd5e1"}}>{p.nombre}</button>
+                    ))}
+                  </div>
+                )}
+
+                {/* lista de citas */}
+                {cargandoCitas ? (
+                  <div style={{...S.card,textAlign:"center",padding:"32px",color:"#64748b",fontSize:"13px"}}>Cargando citas...</div>
+                ) : !diaActivo ? (
+                  <div style={{...S.card,padding:"24px",backgroundColor:"#fff7ed",border:"1px solid #fed7aa",textAlign:"center"}}>
+                    <p style={{fontWeight:"700",color:"#92400e",margin:0}}>Negocio cerrado los {nombreDia(fechaAgenda)}</p>
+                    <p style={{fontSize:"12px",color:"#a16207",marginTop:"4px"}}>Puede configurar los días de atención en <strong>Horario de Atención</strong>.</p>
+                  </div>
+                ) : citasConfirmadas.length===0 ? (
+                  <div style={{...S.card,padding:"32px",textAlign:"center"}}>
+                    <p style={{color:"#64748b",fontSize:"14px",margin:0}}>No hay citas confirmadas para este día.</p>
+                    <button onClick={()=>setTabAgenda(1)} style={{...S.btnSecondary,marginTop:"12px"}}>+ Agendar una cita</button>
+                  </div>
+                ) : (
+                  <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+                    {citasConfirmadas.map(c=>(
+                      <div key={c.id} style={{...S.card,padding:"14px 16px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
+                        <div style={{backgroundColor:"#0f172a",color:"#fff",borderRadius:"8px",padding:"8px 12px",fontWeight:"800",fontSize:"13px",minWidth:"70px",textAlign:"center",flexShrink:0}}>
+                          {hora12(c.hora_inicio)}
+                        </div>
+                        <div style={{flex:1,minWidth:"120px"}}>
+                          <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{c.cliente_nombre}</div>
+                          <div style={{fontSize:"12px",color:"#64748b",marginTop:"2px"}}>
+                            {c.servicio_nombre} · {c.servicio_duracion} min
+                            {c.profesional_nombre&&c.profesional_nombre!=="Sin asignar"&&<> · <strong>{c.profesional_nombre}</strong></>}
+                          </div>
+                          {c.cliente_celular&&c.cliente_celular!=="N/A"&&<div style={{fontSize:"11px",color:"#94a3b8"}}>{c.cliente_celular}</div>}
+                        </div>
+                        <div style={{display:"flex",gap:"6px",flexShrink:0}}>
+                          <span style={S.tag(c.origen==="online"?"#e0f2fe":"#f0fdf4", c.origen==="online"?"#0369a1":"#166534")}>{c.origen==="online"?"Online":"Manual"}</span>
+                          <button onClick={()=>cancelarCita(c.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:"#fff",color:"#dc2626",cursor:"pointer"}}>Cancelar</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 1: NUEVA CITA */}
+            {tabAgenda===1 && (
+              <div style={{maxWidth:"520px"}}>
+                <div style={S.card}>
+                  <h3 style={{...S.h1,marginBottom:"4px"}}>Agendar Manualmente</h3>
+                  <p style={S.sub}>Reserva una cita directamente desde la consola.</p>
+
+                  {/* fecha con navegación */}
+                  <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"16px"}}>
+                    <button onClick={()=>moverFecha(-1)} style={S.btnSecondary}>←</button>
+                    <input type="date" value={fechaAgenda} onChange={e=>setFechaAgenda(e.target.value)} style={{...S.input,flex:1,fontWeight:"700",color:"#0f172a"}}/>
+                    <button onClick={()=>moverFecha(1)} style={S.btnSecondary}>→</button>
+                  </div>
+
+                  {!diaActivo ? (
+                    <div style={{padding:"14px",backgroundColor:"#fff7ed",borderRadius:"8px",color:"#92400e",fontSize:"13px",fontWeight:"600",marginBottom:"12px"}}>El negocio está cerrado los {nombreDia(fechaAgenda)}.</div>
+                  ) : (
+                    <>
+                      <div style={S.row}>
+                        <div style={{...S.field,flex:1}}>
+                          <label style={S.label}>Servicio *</label>
+                          <select value={ncServicioId} onChange={e=>{setNcServicioId(e.target.value);setNcSlot(null);}} style={S.input}>
+                            <option value="">— Seleccionar —</option>
+                            {servicios.map(s=><option key={s.id} value={s.id}>{s.nombre} ({s.duracion} min)</option>)}
+                          </select>
+                        </div>
+                        <div style={{...S.field,flex:1}}>
+                          <label style={S.label}>Profesional</label>
+                          <select value={ncProfId} onChange={e=>setNcProfId(e.target.value)} style={S.input}>
+                            <option value="">Sin asignar</option>
+                            {profesionales.map(p=><option key={p.id} value={p.id}>{p.nombre}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {ncServicioId && slotsNuevaCita.length===0 && <p style={{fontSize:"13px",color:"#64748b"}}>No hay turnos disponibles para este día con el horario configurado.</p>}
+
+                      {ncServicioId && slotsNuevaCita.length>0 && (
+                        <div style={{marginBottom:"16px"}}>
+                          <label style={{...S.label,marginBottom:"8px",display:"block"}}>Horario disponible</label>
+                          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(100px,1fr))",gap:"6px"}}>
+                            {slotsNuevaCita.map((sl,i)=>(
+                              <button key={i} disabled={sl.ocupado} onClick={()=>setNcSlot(sl.ocupado?null:sl)} style={{padding:"9px 4px",borderRadius:"6px",border:`2px solid ${sl.ocupado?"#e2e8f0":ncSlot?.horaInicio===sl.horaInicio?"#0f172a":"#d1fae5"}`,backgroundColor:sl.ocupado?"#f8fafc":ncSlot?.horaInicio===sl.horaInicio?"#0f172a":"#f0fdf4",color:sl.ocupado?"#cbd5e1":ncSlot?.horaInicio===sl.horaInicio?"#fff":"#065f46",fontWeight:"700",fontSize:"12px",cursor:sl.ocupado?"not-allowed":"pointer",textAlign:"center"}}>
+                                {hora12(sl.horaInicio)}
+                                {sl.ocupado&&<div style={{fontSize:"9px",marginTop:"2px"}}>Ocupado</div>}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {ncSlot && (
+                        <>
+                          <div style={{padding:"10px 12px",backgroundColor:"#f0fdf4",borderRadius:"8px",marginBottom:"14px",fontSize:"13px",color:"#065f46",fontWeight:"600"}}>
+                            Turno seleccionado: {hora12(ncSlot.horaInicio)} – {hora12(ncSlot.horaFin)}
+                          </div>
+                          <div style={S.row}>
+                            <div style={{...S.field,flex:2}}><label style={S.label}>Nombre del Cliente *</label><input type="text" placeholder="Nombre completo" value={ncNombre} onChange={e=>setNcNombre(e.target.value)} style={S.input}/></div>
+                            <div style={{...S.field,flex:1}}><label style={S.label}>Celular</label><input type="tel" placeholder="3001234567" value={ncCelular} onChange={e=>setNcCelular(e.target.value)} style={S.input}/></div>
+                          </div>
+                          <div style={{display:"flex",gap:"8px",marginTop:"4px"}}>
+                            <button onClick={reservarCitaManual} disabled={guardandoNc||!ncNombre.trim()} style={{...S.btnPrimary(),flex:2,marginTop:0,opacity:!ncNombre.trim()?0.5:1}}>{guardandoNc?"Guardando...":"Confirmar Cita"}</button>
+                            <button onClick={()=>setNcSlot(null)} style={{...S.btnSecondary,flex:1}}>Cancelar</button>
+                          </div>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {cargandoCitas && <p style={{fontSize:"12px",color:"#64748b",textAlign:"center",marginTop:"8px"}}>Verificando disponibilidad...</p>}
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: ENLACE PÚBLICO */}
+            {tabAgenda===2 && (
+              <div style={{maxWidth:"540px"}}>
+                <div style={S.card}>
+                  <h3 style={{...S.h1,marginBottom:"4px"}}>Enlace y QR de Reservas</h3>
+                  <p style={S.sub}>Imprime el QR, ponlo en tu local o comparte el enlace — tus clientes reservan solos.</p>
+
+                  {/* QR */}
+                  <div style={{display:"flex",gap:"20px",alignItems:"flex-start",flexWrap:"wrap",marginBottom:"20px"}}>
+                    <div style={{backgroundColor:"#fff",border:"1px solid #e2e8f0",borderRadius:"12px",padding:"12px",display:"inline-block"}}>
+                      <img
+                        src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(urlPublica)}&size=160x160&bgcolor=ffffff&color=0f172a&qzone=1`}
+                        alt="QR de reservas"
+                        width="160" height="160"
+                        style={{display:"block",borderRadius:"4px"}}
+                      />
+                    </div>
+                    <div style={{flex:1,minWidth:"180px"}}>
+                      <p style={{fontWeight:"700",color:"#0f172a",fontSize:"13px",margin:"0 0 6px"}}>Cómo usarlo:</p>
+                      <ol style={{fontSize:"12px",color:"#475569",paddingLeft:"16px",margin:"0 0 14px",lineHeight:"2"}}>
+                        <li>Imprime el QR o descárgalo</li>
+                        <li>El cliente lo escanea con su cámara</li>
+                        <li>Elige servicio, profesional, día y hora</li>
+                        <li>La cita aparece aquí automáticamente</li>
+                      </ol>
+                      <a href={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(urlPublica)}&size=800x800&bgcolor=ffffff&color=0f172a`} download="qr-reservas.png" target="_blank" rel="noreferrer" style={{...S.btnSecondary,display:"inline-block",textDecoration:"none",fontSize:"12px"}}>
+                        Descargar QR
+                      </a>
+                    </div>
+                  </div>
+
+                  {/* enlace */}
+                  <div style={{backgroundColor:"#f8fafc",borderRadius:"8px",padding:"12px",marginBottom:"12px",wordBreak:"break-all",fontSize:"12px",color:"#334155",fontFamily:"monospace",border:"1px solid #e2e8f0"}}>
+                    {urlPublica}
+                  </div>
+                  <button onClick={()=>{ navigator.clipboard.writeText(urlPublica).then(()=>alert("¡Enlace copiado al portapapeles!")); }} style={S.btnPrimary()}>
+                    Copiar Enlace
+                  </button>
+
+                  {profesionales.length===0 && (
+                    <div style={{marginTop:"14px",padding:"12px",backgroundColor:"#fff7ed",borderRadius:"8px",fontSize:"12px",color:"#92400e",border:"1px solid #fed7aa"}}>
+                      <strong>Tip:</strong> Agrega profesionales en <strong>Profesionales</strong> para que tus clientes elijan con quién se atienden.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── CATÁLOGO DE SERVICIOS ──────────────────────────────────────── */}
+        {seccionActiva==="servicios" && (
+          <div>
+            <div style={{...S.card,maxWidth:"600px",marginBottom:"16px"}}>
+              <h2 style={S.h1}>Agregar Servicio</h2>
+              <p style={S.sub}>Define los servicios con su precio y duración para usarlos en la agenda.</p>
+              <form onSubmit={agregarServicio}>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:2,minWidth:"160px"}}><label style={S.label}>Nombre del Servicio</label><input type="text" placeholder="Ej: Corte Clásico" value={nuevoServicio.nombre} onChange={e=>setNuevoServicio({...nuevoServicio,nombre:e.target.value})} style={S.input} required/></div>
+                  <div style={{...S.field,flex:1,minWidth:"90px"}}><label style={S.label}>Precio ($)</label><input type="number" placeholder="0" min="0" value={nuevoServicio.precio} onChange={e=>setNuevoServicio({...nuevoServicio,precio:e.target.value})} style={S.input}/></div>
+                  <div style={{...S.field,flex:1,minWidth:"100px"}}><label style={S.label}>Duración</label>
+                    <select value={nuevoServicio.duracion} onChange={e=>setNuevoServicio({...nuevoServicio,duracion:e.target.value})} style={S.input}>
+                      <option value="15">15 min</option><option value="20">20 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 hora</option><option value="90">1h 30m</option><option value="120">2 horas</option>
+                    </select>
+                  </div>
+                </div>
+                <button type="submit" disabled={guardandoServicio} style={S.btnPrimary()}>{guardandoServicio?"Guardando...":"Agregar Servicio"}</button>
+              </form>
+            </div>
+            <div style={{...S.card,maxWidth:"600px"}}>
+              <h2 style={{...S.h1,marginBottom:"16px"}}>Servicios del Catálogo</h2>
+              {servicios.length===0 ? <p style={{color:"#64748b",fontSize:"13px",textAlign:"center",padding:"20px"}}>No hay servicios registrados.</p> : (
+                <table style={S.table}>
+                  <thead><tr><th style={S.th}>Servicio</th><th style={{...S.th,textAlign:"right"}}>Precio</th><th style={{...S.th,textAlign:"center"}}>Duración</th><th style={{...S.th,textAlign:"center"}}>Acción</th></tr></thead>
+                  <tbody>
+                    {servicios.map(s=>(
+                      <tr key={s.id}>
+                        <td style={{...S.td,fontWeight:"600"}}>{s.nombre}</td>
+                        <td style={{...S.td,textAlign:"right",fontWeight:"700"}}>${Number(s.precio).toLocaleString("es-CO")}</td>
+                        <td style={{...S.td,textAlign:"center"}}><span style={S.tag("#f0fdf4","#166534")}>{s.duracion} min</span></td>
+                        <td style={{...S.td,textAlign:"center"}}><button onClick={()=>eliminarServicio(s.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:"#fff",color:"#dc2626",cursor:"pointer"}}>Eliminar</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ─── PROFESIONALES ──────────────────────────────────────────────── */}
+        {seccionActiva==="profesionales" && (
+          <div>
+            <div style={{...S.card,maxWidth:"560px",marginBottom:"16px"}}>
+              <h2 style={S.h1}>Agregar Profesional</h2>
+              <p style={S.sub}>Los profesionales aparecerán en el enlace público para que los clientes los elijan.</p>
+              <form onSubmit={agregarProfesional}>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:2,minWidth:"160px"}}><label style={S.label}>Nombre</label><input type="text" placeholder="Ej: Juan Gómez" value={nuevoProfesional.nombre} onChange={e=>setNuevoProfesional({...nuevoProfesional,nombre:e.target.value})} style={S.input} required/></div>
+                  <div style={{...S.field,flex:1,minWidth:"130px"}}><label style={S.label}>Especialidad (opcional)</label><input type="text" placeholder="Ej: Cortes y Barba" value={nuevoProfesional.especialidad} onChange={e=>setNuevoProfesional({...nuevoProfesional,especialidad:e.target.value})} style={S.input}/></div>
+                </div>
+                <button type="submit" disabled={guardandoProfesional} style={S.btnPrimary()}>{guardandoProfesional?"Guardando...":"Agregar Profesional"}</button>
+              </form>
+            </div>
+            <div style={{...S.card,maxWidth:"560px"}}>
+              <h2 style={{...S.h1,marginBottom:"16px"}}>Equipo del Establecimiento</h2>
+              {profesionales.length===0 ? (
+                <div style={{textAlign:"center",padding:"24px"}}>
+                  <p style={{color:"#64748b",fontSize:"13px"}}>No hay profesionales registrados.</p>
+                  <p style={{color:"#94a3b8",fontSize:"12px"}}>Los clientes verán "Cualquier disponible" en el enlace de reservas.</p>
+                </div>
+              ) : (
+                <table style={S.table}>
+                  <thead><tr><th style={S.th}>Nombre</th><th style={S.th}>Especialidad</th><th style={{...S.th,textAlign:"center"}}>Acción</th></tr></thead>
+                  <tbody>
+                    {profesionales.map(p=>(
+                      <tr key={p.id}>
+                        <td style={{...S.td,fontWeight:"700"}}>{p.nombre}</td>
+                        <td style={S.td}><span style={S.tag()}>{p.especialidad||"—"}</span></td>
+                        <td style={{...S.td,textAlign:"center"}}><button onClick={()=>eliminarProfesional(p.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:"#fff",color:"#dc2626",cursor:"pointer"}}>Eliminar</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ─── PERFIL DEL NEGOCIO ─────────────────────────────────────────── */}
+        {seccionActiva==="perfil" && (
+          <div style={{maxWidth:"520px"}}>
+            <div style={S.card}>
+              <h2 style={S.h1}>Perfil del Negocio</h2>
+              <p style={S.sub}>Esta información aparece en la página pública de reservas que ven tus clientes.</p>
+
+              {/* preview */}
+              <div style={{backgroundColor:"#0f172a",borderRadius:"10px",padding:"20px",textAlign:"center",marginBottom:"20px"}}>
+                {perfilNegocio.logo_url
+                  ? <img src={perfilNegocio.logo_url} alt="logo" style={{width:"60px",height:"60px",borderRadius:"50%",objectFit:"cover",border:"3px solid rgba(255,255,255,0.2)",marginBottom:"10px"}}/>
+                  : <div style={{width:"60px",height:"60px",borderRadius:"50%",backgroundColor:"#1e293b",border:"3px solid rgba(255,255,255,0.15)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"24px",fontWeight:"800",color:"#f59e0b",margin:"0 auto 10px"}}>
+                      {(perfilNegocio.nombre_comercial||"?")[0].toUpperCase()}
+                    </div>}
+                <div style={{fontWeight:"800",color:"#fff",fontSize:"16px"}}>{perfilNegocio.nombre_comercial||"Nombre del negocio"}</div>
+                {perfilNegocio.tagline && <div style={{color:"#94a3b8",fontSize:"12px",marginTop:"3px"}}>{perfilNegocio.tagline}</div>}
+                <div style={{fontSize:"10px",color:"#475569",marginTop:"6px"}}>Vista previa del encabezado público</div>
+              </div>
+
+              <form onSubmit={guardarPerfil}>
+                <div style={S.field}>
+                  <label style={S.label}>Nombre del Negocio</label>
+                  <input type="text" placeholder="Ej: Barbería El Estilo" value={perfilNegocio.nombre_comercial} onChange={e=>setPerfilNegocio({...perfilNegocio,nombre_comercial:e.target.value})} style={S.input}/>
+                </div>
+                <div style={S.field}>
+                  <label style={S.label}>Eslogan / Descripción corta</label>
+                  <input type="text" placeholder="Ej: Tu estilo, nuestra pasión" value={perfilNegocio.tagline} onChange={e=>setPerfilNegocio({...perfilNegocio,tagline:e.target.value})} style={S.input}/>
+                </div>
+                <div style={S.field}>
+                  <label style={S.label}>URL del Logo o Foto</label>
+                  <input type="url" placeholder="https://..." value={perfilNegocio.logo_url} onChange={e=>setPerfilNegocio({...perfilNegocio,logo_url:e.target.value})} style={S.input}/>
+                  <p style={{fontSize:"11px",color:"#94a3b8",marginTop:"5px"}}>Sube tu imagen a <strong>imgbb.com</strong> o <strong>imgur.com</strong> y pega el enlace directo aquí.</p>
+                </div>
+                <button type="submit" disabled={guardandoPerfil} style={S.btnPrimary()}>{guardandoPerfil?"Guardando...":"Guardar Perfil"}</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* ─── HORARIO DE ATENCIÓN ────────────────────────────────────────── */}
+        {seccionActiva==="configuracion" && (
+          <div style={{maxWidth:"520px"}}>
+            <div style={S.card}>
+              <h2 style={S.h1}>Horario de Atención</h2>
+              <p style={S.sub}>Configure su horario de apertura y cierre. La agenda se genera automáticamente dentro de esta franja con la duración de cada servicio.</p>
+              <form onSubmit={guardarConfigAgenda}>
+                <div style={S.secLabel}>Horas de Operación</div>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Apertura</label><input type="time" value={configAgenda.hora_inicio} onChange={e=>setConfigAgenda({...configAgenda,hora_inicio:e.target.value})} style={S.input}/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Cierre</label><input type="time" value={configAgenda.hora_fin} onChange={e=>setConfigAgenda({...configAgenda,hora_fin:e.target.value})} style={S.input}/></div>
+                </div>
+                <div style={S.secLabel}>Días de Atención</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:"8px",marginBottom:"20px"}}>
+                  {["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"].map(dia=>{
+                    const activo=(configAgenda.dias_activos||[]).includes(dia);
+                    return <button key={dia} type="button" onClick={()=>toggleDia(dia)} style={{padding:"8px 14px",borderRadius:"6px",border:`1px solid ${activo?"#0f172a":"#cbd5e1"}`,backgroundColor:activo?"#0f172a":"#fff",color:activo?"#fff":"#64748b",fontSize:"13px",fontWeight:"600",cursor:"pointer"}}>{dia}</button>;
+                  })}
+                </div>
+                <button type="submit" disabled={guardandoConfig} style={S.btnPrimary()}>{guardandoConfig?"Guardando...":"Guardar Horario"}</button>
+              </form>
+            </div>
           </div>
         )}
 
