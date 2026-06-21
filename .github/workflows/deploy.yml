@@ -16,6 +16,24 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
+      - name: Verificar secret
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "❌ El secret FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 está VACÍO o no existe en este repo"
+            exit 1
+          fi
+          CHARS=$(echo -n "$SA" | wc -c)
+          echo "✅ Secret encontrado — $CHARS caracteres"
+          # Verificar que es JSON válido
+          if echo "$SA" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            echo "✅ El JSON es válido"
+          else
+            echo "❌ El contenido NO es JSON válido — verifica que copiaste todo el archivo .json"
+            exit 1
+          fi
+
       - name: Instalar dependencias
         run: npm ci
 
