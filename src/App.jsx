@@ -8,7 +8,7 @@ import {
 import {
   doc, collection, writeBatch, increment, onSnapshot,
   query, orderBy, limit, getDocs, startAfter,
-  setDoc, addDoc, deleteDoc, where, getDoc
+  setDoc, addDoc, deleteDoc, where, getDoc, arrayUnion
 } from "firebase/firestore";
 import { db, auth } from "./firebase";
 
@@ -138,6 +138,7 @@ function App() {
   const [nuevaValera, setNuevaValera] = useState({ nombre: "", celular: "", cantidad: "10" });
   const [guardandoValera, setGuardandoValera] = useState(false);
   const [recargaVal, setRecargaVal] = useState({});
+  const [valeraHistOpen, setValeraHistOpen] = useState({});
 
   // fiar (tienda)
   const [fiados, setFiados] = useState([]);
@@ -435,7 +436,10 @@ function App() {
 
   const descontarAlmuerzo = async (v) => {
     if (v.saldo <= 0) return;
-    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), { saldo: v.saldo - 1 }, { merge: true });
+    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), {
+      saldo: v.saldo - 1,
+      usos: arrayUnion(new Date())
+    }, { merge: true });
   };
 
   const recargarValera = async (v) => {
@@ -856,40 +860,8 @@ function App() {
   // ══════════════════════════════════════════════════════════════════════════
   if (cargandoAuth) return <div style={S.page}><p style={{color:"#64748b"}}>Cargando...</p></div>;
 
-  if (!usuario) return (
-    <div style={S.page}>
-      <div style={{width:"100%",maxWidth:"420px"}}>
-        <div style={S.card}>
-          <h2 style={S.h1}>{modoRegistro?"Crear Cuenta":"Iniciar Sesión"}</h2>
-          <p style={S.sub}>{modoRegistro?"Registre su establecimiento en Soldi.":"Ingrese a su consola operativa."}</p>
-          <form onSubmit={ejecutarAuth}>
-            {modoRegistro&&<div style={S.field}><label style={S.label}>Nombre del Negocio</label><input type="text" placeholder="Ej: Barbería El Estilo" value={nombreNegocio} onChange={e=>setNombreNegocio(e.target.value)} style={S.input} required/></div>}
-            <div style={S.field}><label style={S.label}>Correo Electrónico</label><input type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} style={S.input} required/></div>
-            <div style={S.field}><label style={S.label}>Contraseña</label><input type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} style={S.input} required/></div>
-            <button type="submit" disabled={procesandoAccion} style={S.btnPrimary()}>{procesandoAccion?"...":modoRegistro?"Registrarme":"Ingresar"}</button>
-          </form>
-          <p style={{textAlign:"center",fontSize:"12px",color:"#64748b",marginTop:"16px",cursor:"pointer",textDecoration:"underline"}} onClick={()=>setModoRegistro(!modoRegistro)}>
-            {modoRegistro?"¿Ya tienes cuenta? Ingresa aquí":"¿Nuevo negocio? Regístralo aquí"}
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (!negocioActivo) return (
-    <div style={S.page}>
-      <div style={{...S.card,maxWidth:"440px",textAlign:"center",border:"1px solid #ef4444"}}>
-        <h2 style={{...S.h1,color:"#b91c1c"}}>Acceso Suspendido</h2>
-        <p style={{...S.sub,marginTop:"8px"}}>Su suscripción tiene un pendiente de pago. Comuníquese con el administrador.</p>
-        <button onClick={cerrarSesion} style={S.btnPrimary()}>Cambiar de Cuenta</button>
-      </div>
-    </div>
-  );
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // PANEL ADMIN
-  // ══════════════════════════════════════════════════════════════════════════
-  if (esAdmin) {
+  // Admin check va primero — nunca debe ver la pantalla de suspensión
+  if (esAdmin && usuario) {
     const totalActivos = negociosList.filter(n => n.activo !== false).length;
     const porTipo = negociosList.reduce((acc,n) => { const t = n.tipo_negocio||"barberia"; acc[t]=(acc[t]||0)+1; return acc; }, {});
     return (
@@ -922,35 +894,21 @@ function App() {
             {negociosList.length > 0 && (
               <div style={{overflowX:"auto"}}>
                 <table style={S.table}>
-                  <thead>
-                    <tr>
-                      <th style={S.th}>Negocio</th>
-                      <th style={S.th}>ID / Email</th>
-                      <th style={S.th}>Tipo</th>
-                      <th style={{...S.th,textAlign:"center"}}>Estado</th>
-                    </tr>
-                  </thead>
+                  <thead><tr><th style={S.th}>Negocio</th><th style={S.th}>ID</th><th style={S.th}>Tipo</th><th style={{...S.th,textAlign:"center"}}>Estado</th></tr></thead>
                   <tbody>
                     {negociosList.map(n => (
                       <tr key={n.id}>
                         <td style={{...S.td,fontWeight:"700"}}>{n.nombre_comercial || "Sin nombre"}</td>
                         <td style={{...S.td,fontSize:"11px",color:"#94a3b8",fontFamily:"monospace"}}>{n.id.substring(0,12)}...</td>
                         <td style={S.td}>
-                          <select
-                            value={n.tipo_negocio || "barberia"}
-                            onChange={e => cambiarTipoAdmin(n.id, e.target.value)}
-                            style={{...S.input,padding:"5px 8px",fontSize:"12px",width:"auto"}}
-                          >
+                          <select value={n.tipo_negocio || "barberia"} onChange={e => cambiarTipoAdmin(n.id, e.target.value)} style={{...S.input,padding:"5px 8px",fontSize:"12px",width:"auto"}}>
                             <option value="barberia">Barbería</option>
                             <option value="restaurante">Restaurante</option>
                             <option value="tienda">Tienda</option>
                           </select>
                         </td>
                         <td style={{...S.td,textAlign:"center"}}>
-                          <button
-                            onClick={() => toggleActivoAdmin(n.id, n.activo !== false)}
-                            style={{padding:"5px 12px",fontSize:"11px",fontWeight:"700",border:"none",borderRadius:"20px",cursor:"pointer",backgroundColor:n.activo!==false?"#dcfce7":"#fee2e2",color:n.activo!==false?"#166534":"#dc2626"}}
-                          >
+                          <button onClick={() => toggleActivoAdmin(n.id, n.activo !== false)} style={{padding:"5px 12px",fontSize:"11px",fontWeight:"700",border:"none",borderRadius:"20px",cursor:"pointer",backgroundColor:n.activo!==false?"#dcfce7":"#fee2e2",color:n.activo!==false?"#166534":"#dc2626"}}>
                             {n.activo !== false ? "Activo" : "Suspendido"}
                           </button>
                         </td>
@@ -965,6 +923,38 @@ function App() {
       </div>
     );
   }
+
+  if (!usuario) return (
+    <div style={S.page}>
+      <div style={{width:"100%",maxWidth:"420px"}}>
+        <div style={S.card}>
+          <h2 style={S.h1}>{modoRegistro?"Crear Cuenta":"Iniciar Sesión"}</h2>
+          <p style={S.sub}>{modoRegistro?"Registre su establecimiento en Soldi.":"Ingrese a su consola operativa."}</p>
+          <form onSubmit={ejecutarAuth}>
+            {modoRegistro&&<div style={S.field}><label style={S.label}>Nombre del Negocio</label><input type="text" placeholder="Ej: Barbería El Estilo" value={nombreNegocio} onChange={e=>setNombreNegocio(e.target.value)} style={S.input} required/></div>}
+            <div style={S.field}><label style={S.label}>Correo Electrónico</label><input type="email" value={authEmail} onChange={e=>setAuthEmail(e.target.value)} style={S.input} required/></div>
+            <div style={S.field}><label style={S.label}>Contraseña</label><input type="password" value={authPassword} onChange={e=>setAuthPassword(e.target.value)} style={S.input} required/></div>
+            <button type="submit" disabled={procesandoAccion} style={S.btnPrimary()}>{procesandoAccion?"...":modoRegistro?"Registrarme":"Ingresar"}</button>
+          </form>
+          <p style={{textAlign:"center",fontSize:"12px",color:"#64748b",marginTop:"16px",cursor:"pointer",textDecoration:"underline"}} onClick={()=>setModoRegistro(!modoRegistro)}>
+            {modoRegistro?"¿Ya tienes cuenta? Ingresa aquí":"¿Nuevo negocio? Regístralo aquí"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!negocioActivo) return (
+    <div style={S.page}>
+      <div style={{...S.card,maxWidth:"440px",textAlign:"center",border:"1px solid #ef4444"}}>
+        <h2 style={{...S.h1,color:"#b91c1c"}}>Acceso Suspendido</h2>
+        <p style={{...S.sub,marginTop:"8px"}}>Su suscripción tiene un pendiente de pago. Comuníquese con el administrador.</p>
+        <button onClick={cerrarSesion} style={S.btnPrimary()}>Cambiar de Cuenta</button>
+      </div>
+    </div>
+  );
+
+
 
   // ══════════════════════════════════════════════════════════════════════════
   // VARIABLES DERIVADAS (agenda)
@@ -1474,25 +1464,50 @@ function App() {
                   const color = v.saldo === 0 ? "#dc2626" : v.saldo <= 3 ? "#d97706" : "#16a34a";
                   const bg = v.saldo === 0 ? "#fee2e2" : v.saldo <= 3 ? "#fef3c7" : "#dcfce7";
                   return (
-                    <div key={v.id} style={{...S.card,padding:"14px 16px",display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
-                      <div style={{flex:1,minWidth:"120px"}}>
-                        <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{v.cliente_nombre}</div>
-                        {v.cliente_celular !== "N/A" && <div style={{fontSize:"12px",color:"#64748b"}}>{v.cliente_celular}</div>}
-                      </div>
-                      <div style={{backgroundColor:bg,color,borderRadius:"10px",padding:"8px 16px",fontWeight:"800",fontSize:"20px",textAlign:"center",minWidth:"70px"}}>
-                        {v.saldo}
-                        <div style={{fontSize:"10px",fontWeight:"600"}}>almuerzos</div>
-                      </div>
-                      <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
-                        <button onClick={()=>descontarAlmuerzo(v)} disabled={v.saldo<=0} style={{padding:"7px 14px",fontSize:"12px",fontWeight:"700",border:"none",borderRadius:"6px",cursor:v.saldo>0?"pointer":"not-allowed",backgroundColor:v.saldo>0?"#0f172a":"#f1f5f9",color:v.saldo>0?"#fff":"#cbd5e1"}}>
-                          − 1 almuerzo
-                        </button>
-                        <div style={{display:"flex",gap:"4px",alignItems:"center"}}>
-                          <input type="number" min="1" placeholder="Cant" value={recargaVal[v.id]||""} onChange={e=>setRecargaVal(prev=>({...prev,[v.id]:e.target.value}))} style={{...S.input,width:"60px",padding:"7px 8px",fontSize:"12px"}}/>
-                          <button onClick={()=>recargarValera(v)} style={{padding:"7px 10px",fontSize:"12px",fontWeight:"700",border:"1px solid #16a34a",borderRadius:"6px",cursor:"pointer",backgroundColor:"#f0fdf4",color:"#16a34a"}}>+ Recargar</button>
+                    <div key={v.id} style={{...S.card,padding:"14px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
+                        <div style={{flex:1,minWidth:"120px"}}>
+                          <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{v.cliente_nombre}</div>
+                          {v.cliente_celular !== "N/A" && <div style={{fontSize:"12px",color:"#64748b"}}>{v.cliente_celular}</div>}
                         </div>
-                        <button onClick={()=>eliminarValera(v.id)} style={{padding:"7px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#dc2626"}}>Eliminar</button>
+                        <div style={{backgroundColor:bg,color,borderRadius:"10px",padding:"8px 16px",fontWeight:"800",fontSize:"20px",textAlign:"center",minWidth:"70px"}}>
+                          {v.saldo}
+                          <div style={{fontSize:"10px",fontWeight:"600"}}>almuerzos</div>
+                        </div>
+                        <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+                          <button onClick={()=>descontarAlmuerzo(v)} disabled={v.saldo<=0} style={{padding:"7px 14px",fontSize:"12px",fontWeight:"700",border:"none",borderRadius:"6px",cursor:v.saldo>0?"pointer":"not-allowed",backgroundColor:v.saldo>0?"#0f172a":"#f1f5f9",color:v.saldo>0?"#fff":"#cbd5e1"}}>
+                            − 1 almuerzo
+                          </button>
+                          <div style={{display:"flex",gap:"4px",alignItems:"center"}}>
+                            <input type="number" min="1" placeholder="Cant" value={recargaVal[v.id]||""} onChange={e=>setRecargaVal(prev=>({...prev,[v.id]:e.target.value}))} style={{...S.input,width:"60px",padding:"7px 8px",fontSize:"12px"}}/>
+                            <button onClick={()=>recargarValera(v)} style={{padding:"7px 10px",fontSize:"12px",fontWeight:"700",border:"1px solid #16a34a",borderRadius:"6px",cursor:"pointer",backgroundColor:"#f0fdf4",color:"#16a34a"}}>+ Recargar</button>
+                          </div>
+                          <button onClick={()=>setValeraHistOpen(p=>({...p,[v.id]:!p[v.id]}))} style={{padding:"7px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #e2e8f0",borderRadius:"6px",cursor:"pointer",backgroundColor:"#f8fafc",color:"#475569"}}>
+                            {valeraHistOpen[v.id] ? "Ocultar" : `Historial (${(v.usos||[]).length})`}
+                          </button>
+                          <button onClick={()=>eliminarValera(v.id)} style={{padding:"7px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#dc2626"}}>Eliminar</button>
+                        </div>
                       </div>
+                      {valeraHistOpen[v.id] && (
+                        <div style={{marginTop:"12px",borderTop:"1px solid #f1f5f9",paddingTop:"10px"}}>
+                          {(v.usos||[]).length === 0
+                            ? <p style={{fontSize:"12px",color:"#94a3b8",margin:0}}>Sin usos registrados aún.</p>
+                            : <div style={{display:"flex",flexDirection:"column",gap:"4px",maxHeight:"180px",overflowY:"auto"}}>
+                              {[...(v.usos||[])].sort((a,b)=>(b?.seconds||0)-(a?.seconds||0)).map((u,i)=>{
+                                const fecha = u?.toDate ? u.toDate() : u?.seconds ? new Date(u.seconds*1000) : new Date(u);
+                                return (
+                                  <div key={i} style={{display:"flex",alignItems:"center",gap:"8px",fontSize:"12px",color:"#475569",padding:"4px 0",borderBottom:"1px solid #f8fafc"}}>
+                                    <span style={{fontSize:"10px",backgroundColor:"#f1f5f9",borderRadius:"4px",padding:"2px 6px",fontWeight:"600",color:"#64748b",flexShrink:0}}>#{(v.usos||[]).length - i}</span>
+                                    <span>{fecha.toLocaleDateString("es-CO",{weekday:"short",day:"numeric",month:"short"})}</span>
+                                    <span style={{color:"#94a3b8"}}>—</span>
+                                    <span style={{fontWeight:"600"}}>{fecha.toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"})}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          }
+                        </div>
+                      )}
                     </div>
                   );
                 })}
