@@ -23,6 +23,6 @@ jobs:
         run: npm run build
 
       - name: Deploy a Firebase Hosting
-        run: npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
+        run: npx firebase-tools@12 deploy --only hosting --project sodi-8b6d2 --non-interactive
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
