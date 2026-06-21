@@ -57,14 +57,6 @@ function App() {
     return () => window.removeEventListener("resize", h);
   }, []);
 
-  // cargar datos del dashboard cuando se entra a la sección o cambia el mes
-  useEffect(() => {
-    if (seccionActiva === "dashboard" && usuario && !esAdmin) {
-      cargarDashboard(dashMes);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seccionActiva, dashMes, usuario]);
-
   // auth / negocio
   const [usuario, setUsuario] = useState(null);
   const [negocioActivo, setNegocioActivo] = useState(true);
@@ -326,6 +318,14 @@ function App() {
       setFacturasDash(snap.docs.map(d => ({ id:d.id,...d.data() })));
     } catch(e){ console.error(e); } finally { setCargandoDash(false); }
   };
+
+  // cargar dashboard al entrar a la sección o cambiar el mes
+  useEffect(() => {
+    if (seccionActiva === "dashboard" && usuario && !esAdmin) {
+      cargarDashboard(dashMes);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seccionActiva, dashMes, usuario]);
 
   // ── historial ────────────────────────────────────────────────────────────
   const cargarPrimerasFacturas = async (uid) => {
