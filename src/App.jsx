@@ -307,7 +307,7 @@ function App() {
       if (modoRegistro) {
         const { user } = await createUserWithEmailAndPassword(auth, authEmail, authPassword);
         const batch = writeBatch(db);
-        batch.set(doc(db,"negocios",user.uid),{ nombre_comercial:nombreNegocio, fecha_registro:new Date(), plan:"Gratuito", activo:true });
+        batch.set(doc(db,"negocios",user.uid),{ nombre_comercial:nombreNegocio, fecha_registro:new Date(), plan:"Gratuito", activo:true, tipo_negocio:"barberia" });
         await batch.commit();
         alert("Establecimiento registrado exitosamente.");
       } else { await signInWithEmailAndPassword(auth, authEmail, authPassword); }
@@ -993,7 +993,7 @@ function App() {
         <button style={S.mBtn(seccionActiva==="registrar")} onClick={()=>setSeccionActiva("registrar")}>Registrar Venta</button>
         <button style={S.mBtn(seccionActiva==="historial")} onClick={()=>setSeccionActiva("historial")}>Historial de Ventas</button>
 
-        {tipoNegocio === "barberia" && <>
+        {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <>
           <p style={S.mCat}>Agenda</p>
           <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>{ setSeccionActiva("agenda"); setTabAgenda(0); }}>Agenda de Citas</button>
           <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>setSeccionActiva("servicios")}>Catálogo de Servicios</button>
@@ -1012,7 +1012,7 @@ function App() {
 
         <p style={S.mCat}>Ajustes</p>
         <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>setSeccionActiva("perfil")}>Perfil del Negocio</button>
-        {tipoNegocio === "barberia" && <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>}
+        {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>}
 
         <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>
       </div>
