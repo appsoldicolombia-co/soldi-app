@@ -715,7 +715,14 @@ function App() {
     }
 
     const pubServSelec = pubServicios.find(s=>s.id===pubServicioId);
-    const pubSlotsDisp = pubServSelec ? generarSlots(pubConfig, pubCitasDia, pubServSelec.duracion) : [];
+    const ahora = new Date();
+    const horaActual = `${String(ahora.getHours()).padStart(2,"0")}:${String(ahora.getMinutes()).padStart(2,"0")}`;
+    const pubSlotsDisp = pubServSelec
+      ? generarSlots(pubConfig, pubCitasDia, pubServSelec.duracion).map(sl => ({
+          ...sl,
+          ocupado: sl.ocupado || (pubFecha === hoy() && sl.horaInicio < horaActual)
+        }))
+      : [];
     const diaActivoPub = (pubConfig.dias_activos||[]).includes(nombreDia(pubFecha));
     const totalSteps = pubProfesionales.length > 0 ? 4 : 3;
     const stepActual = pubProfesionales.length > 0 ? pubStep : pubStep === 1 ? 1 : pubStep - 1;
