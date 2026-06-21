@@ -39,6 +39,15 @@ const generarSlots = (config, citas, duracion) => {
 // ─── componente principal ─────────────────────────────────────────────────────
 function App() {
 
+  // dark mode
+  const [darkMode, setDarkMode] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const h = e => setDarkMode(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+
   // auth / negocio
   const [usuario, setUsuario] = useState(null);
   const [negocioActivo, setNegocioActivo] = useState(true);
@@ -605,11 +614,27 @@ function App() {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
-  // ESTILOS
+  // TEMA Y ESTILOS
   // ══════════════════════════════════════════════════════════════════════════
+  const T = {
+    bg:       darkMode ? "#0f172a" : "#f8fafc",
+    surface:  darkMode ? "#1e293b" : "#ffffff",
+    surfaceAlt: darkMode ? "#0f172a" : "#f8fafc",
+    border:   darkMode ? "#334155" : "#e2e8f0",
+    borderSub:darkMode ? "#1e293b" : "#f1f5f9",
+    text:     darkMode ? "#f1f5f9" : "#0f172a",
+    textSub:  darkMode ? "#94a3b8" : "#64748b",
+    textMid:  darkMode ? "#cbd5e1" : "#334155",
+    textMuted:darkMode ? "#64748b" : "#475569",
+    inputBg:  darkMode ? "#0f172a" : "#ffffff",
+    inputBorder: darkMode ? "#475569" : "#cbd5e1",
+    tagBg:    darkMode ? "#334155" : "#f1f5f9",
+    tagColor: darkMode ? "#cbd5e1" : "#475569",
+  };
+
   const S = {
-    page:{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",backgroundColor:"#f8fafc",fontFamily:"system-ui,sans-serif",padding:"16px",boxSizing:"border-box" },
-    layout:{ display:"flex",flexWrap:"wrap",minHeight:"100vh",backgroundColor:"#f8fafc",fontFamily:"system-ui,sans-serif" },
+    page:{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",backgroundColor:T.bg,fontFamily:"system-ui,sans-serif",padding:"16px",boxSizing:"border-box" },
+    layout:{ display:"flex",flexWrap:"wrap",minHeight:"100vh",backgroundColor:T.bg,fontFamily:"system-ui,sans-serif" },
     sidebar:{ width:"100%",minWidth:"220px",flex:"1 1 220px",backgroundColor:"#0f172a",color:"#fff",display:"flex",flexDirection:"column",padding:"20px 14px",boxSizing:"border-box",gap:"2px" },
     logo:{ fontSize:"20px",fontWeight:"800",marginBottom:"20px",paddingLeft:"10px",display:"flex",alignItems:"baseline",gap:"5px" },
     vTag:{ fontSize:"9px",color:"#475569",fontWeight:"400" },
@@ -617,25 +642,25 @@ function App() {
     mBtn:(a)=>({ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"none",backgroundColor:a?"#1e293b":"transparent",color:a?"#fff":"#94a3b8",textAlign:"left",fontSize:"13px",fontWeight:"600",cursor:"pointer" }),
     logoutBtn:{ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"1px solid #1e293b",backgroundColor:"transparent",color:"#94a3b8",fontSize:"12px",fontWeight:"500",cursor:"pointer",marginTop:"auto" },
     main:{ flex:"1 1 320px",padding:"24px 20px",boxSizing:"border-box" },
-    card:{ backgroundColor:"#fff",borderRadius:"10px",border:"1px solid #e2e8f0",boxShadow:"0 1px 3px rgba(0,0,0,0.05)",padding:"20px",boxSizing:"border-box" },
-    h1:{ fontSize:"20px",fontWeight:"700",color:"#0f172a",margin:"0 0 4px 0" },
-    sub:{ fontSize:"13px",color:"#64748b",margin:"0 0 20px 0" },
+    card:{ backgroundColor:T.surface,borderRadius:"10px",border:`1px solid ${T.border}`,boxShadow:darkMode?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 3px rgba(0,0,0,0.05)",padding:"20px",boxSizing:"border-box" },
+    h1:{ fontSize:"20px",fontWeight:"700",color:T.text,margin:"0 0 4px 0" },
+    sub:{ fontSize:"13px",color:T.textSub,margin:"0 0 20px 0" },
     field:{ display:"flex",flexDirection:"column",marginBottom:"14px" },
-    label:{ fontSize:"12px",fontWeight:"600",color:"#334155",marginBottom:"5px" },
-    input:{ width:"100%",padding:"9px 12px",fontSize:"13px",borderRadius:"6px",border:"1px solid #cbd5e1",boxSizing:"border-box" },
+    label:{ fontSize:"12px",fontWeight:"600",color:T.textMid,marginBottom:"5px" },
+    input:{ width:"100%",padding:"9px 12px",fontSize:"13px",borderRadius:"6px",border:`1px solid ${T.inputBorder}`,boxSizing:"border-box",backgroundColor:T.inputBg,color:T.text },
     row:{ display:"flex",flexWrap:"wrap",gap:"14px" },
-    secLabel:{ fontSize:"11px",fontWeight:"700",color:"#475569",textTransform:"uppercase",margin:"20px 0 10px",paddingBottom:"5px",borderBottom:"1px solid #f1f5f9" },
+    secLabel:{ fontSize:"11px",fontWeight:"700",color:T.textMuted,textTransform:"uppercase",margin:"20px 0 10px",paddingBottom:"5px",borderBottom:`1px solid ${T.borderSub}` },
     btnPrimary:(color="#0f172a")=>({ width:"100%",padding:"11px",fontSize:"13px",fontWeight:"600",color:"#fff",border:"none",borderRadius:"6px",cursor:"pointer",backgroundColor:color,marginTop:"8px" }),
-    btnSecondary:{ padding:"8px 16px",fontSize:"12px",fontWeight:"600",border:"1px solid #cbd5e1",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#475569" },
+    btnSecondary:{ padding:"8px 16px",fontSize:"12px",fontWeight:"600",border:`1px solid ${T.border}`,borderRadius:"6px",cursor:"pointer",backgroundColor:T.surface,color:T.textMuted },
     kpiGrid:{ display:"flex",flexWrap:"wrap",gap:"14px",marginBottom:"20px" },
-    kpiCard:{ flex:"1 1 180px",backgroundColor:"#fff",border:"1px solid #e2e8f0",borderRadius:"10px",padding:"18px" },
-    kpiLabel:{ fontSize:"11px",fontWeight:"600",color:"#64748b",textTransform:"uppercase",margin:0 },
-    kpiVal:{ fontSize:"22px",fontWeight:"800",color:"#0f172a",margin:"6px 0 0 0" },
+    kpiCard:{ flex:"1 1 180px",backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"10px",padding:"18px" },
+    kpiLabel:{ fontSize:"11px",fontWeight:"600",color:T.textSub,textTransform:"uppercase",margin:0 },
+    kpiVal:{ fontSize:"22px",fontWeight:"800",color:T.text,margin:"6px 0 0 0" },
     table:{ width:"100%",borderCollapse:"collapse",fontSize:"13px" },
-    th:{ textAlign:"left",padding:"11px 12px",backgroundColor:"#f8fafc",color:"#475569",fontWeight:"600",borderBottom:"1px solid #e2e8f0" },
-    td:{ padding:"13px 12px",borderBottom:"1px solid #f1f5f9",color:"#334155",verticalAlign:"middle" },
+    th:{ textAlign:"left",padding:"11px 12px",backgroundColor:T.surfaceAlt,color:T.textMuted,fontWeight:"600",borderBottom:`1px solid ${T.border}` },
+    td:{ padding:"13px 12px",borderBottom:`1px solid ${T.borderSub}`,color:T.textMid,verticalAlign:"middle" },
     badge:(bg,color)=>({ fontSize:"11px",fontWeight:"700",padding:"3px 8px",borderRadius:"20px",backgroundColor:bg,color:color }),
-    tag:(bg="#f1f5f9",c="#475569")=>({ fontSize:"12px",fontWeight:"600",padding:"4px 10px",borderRadius:"20px",backgroundColor:bg,color:c }),
+    tag:(bg,c)=>({ fontSize:"12px",fontWeight:"600",padding:"4px 10px",borderRadius:"20px",backgroundColor:bg||T.tagBg,color:c||T.tagColor }),
   };
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -643,7 +668,7 @@ function App() {
   // ══════════════════════════════════════════════════════════════════════════
   if (modoPublico) {
     const PUB = {
-      wrap: { minHeight:"100vh", backgroundColor:"#f1f5f9", fontFamily:"system-ui,sans-serif" },
+      wrap: { minHeight:"100vh", backgroundColor:T.bg, fontFamily:"system-ui,sans-serif" },
       hero: { backgroundColor:"#0f172a", padding:"28px 20px 24px", textAlign:"center" },
       logoCircle: (url) => url
         ? { width:"72px",height:"72px",borderRadius:"50%",backgroundImage:`url(${url})`,backgroundSize:"cover",backgroundPosition:"center",margin:"0 auto 12px",border:"3px solid rgba(255,255,255,0.2)" }
@@ -653,16 +678,16 @@ function App() {
       steps: { display:"flex",alignItems:"center",justifyContent:"center",gap:"0",padding:"0 20px",margin:"20px 0 0" },
       stepDot: (done,active) => ({ width:"28px",height:"28px",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"12px",fontWeight:"700",flexShrink:0,backgroundColor:done?"#f59e0b":active?"#fff":"rgba(255,255,255,0.15)",color:done?"#0f172a":active?"#0f172a":"rgba(255,255,255,0.4)" }),
       stepLine: (done) => ({ flex:1,height:"2px",backgroundColor:done?"#f59e0b":"rgba(255,255,255,0.15)" }),
-      card: { backgroundColor:"#fff",margin:"16px",borderRadius:"16px",padding:"20px",boxShadow:"0 4px 24px rgba(0,0,0,0.08)" },
-      servBtn: (sel) => ({ width:"100%",padding:"14px 16px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":"#e2e8f0"}`,backgroundColor:sel?"#fffbeb":"#fff",cursor:"pointer",textAlign:"left",marginBottom:"8px",transition:"all 0.15s" }),
-      profBtn: (sel) => ({ width:"100%",padding:"12px 14px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":"#e2e8f0"}`,backgroundColor:sel?"#fffbeb":"#fff",cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:"12px",marginBottom:"8px" }),
+      card: { backgroundColor:T.surface,margin:"16px",borderRadius:"16px",padding:"20px",boxShadow:darkMode?"0 4px 24px rgba(0,0,0,0.4)":"0 4px 24px rgba(0,0,0,0.08)" },
+      servBtn: (sel) => ({ width:"100%",padding:"14px 16px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":T.border}`,backgroundColor:sel?darkMode?"#422006":"#fffbeb":T.surface,cursor:"pointer",textAlign:"left",marginBottom:"8px",transition:"all 0.15s" }),
+      profBtn: (sel) => ({ width:"100%",padding:"12px 14px",borderRadius:"10px",border:`2px solid ${sel?"#f59e0b":T.border}`,backgroundColor:sel?darkMode?"#422006":"#fffbeb":T.surface,cursor:"pointer",textAlign:"left",display:"flex",alignItems:"center",gap:"12px",marginBottom:"8px" }),
       profAvatar: { width:"40px",height:"40px",borderRadius:"50%",backgroundColor:"#0f172a",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"700",fontSize:"16px",flexShrink:0 },
-      slotBtn: (sel,ocu) => ({ padding:"11px 6px",borderRadius:"8px",border:`2px solid ${ocu?"#f1f5f9":sel?"#f59e0b":"#d1fae5"}`,backgroundColor:ocu?"#f8fafc":sel?"#fffbeb":"#f0fdf4",color:ocu?"#cbd5e1":sel?"#b45309":"#065f46",fontWeight:"700",fontSize:"13px",cursor:ocu?"not-allowed":"pointer",textAlign:"center" }),
+      slotBtn: (sel,ocu) => ({ padding:"11px 6px",borderRadius:"8px",border:`2px solid ${ocu?T.border:sel?"#f59e0b":darkMode?"#14532d":"#d1fae5"}`,backgroundColor:ocu?T.surfaceAlt:sel?darkMode?"#422006":"#fffbeb":darkMode?"#052e16":"#f0fdf4",color:ocu?T.textMuted:sel?"#f59e0b":darkMode?"#4ade80":"#065f46",fontWeight:"700",fontSize:"13px",cursor:ocu?"not-allowed":"pointer",textAlign:"center" }),
       btnPrimary: { width:"100%",padding:"14px",fontSize:"15px",fontWeight:"700",color:"#fff",border:"none",borderRadius:"10px",cursor:"pointer",backgroundColor:"#f59e0b",marginTop:"6px",letterSpacing:"-0.2px" },
-      btnBack: { padding:"8px 14px",fontSize:"12px",fontWeight:"600",border:"1px solid #e2e8f0",borderRadius:"8px",cursor:"pointer",backgroundColor:"transparent",color:"#64748b",marginBottom:"16px" },
-      input: { width:"100%",padding:"12px 14px",fontSize:"14px",borderRadius:"10px",border:"1px solid #e2e8f0",boxSizing:"border-box",marginTop:"5px" },
-      label: { fontSize:"13px",fontWeight:"600",color:"#334155",display:"block",marginBottom:"12px" },
-      footer: { textAlign:"center",padding:"20px",fontSize:"11px",color:"#94a3b8" }
+      btnBack: { padding:"8px 14px",fontSize:"12px",fontWeight:"600",border:`1px solid ${T.border}`,borderRadius:"8px",cursor:"pointer",backgroundColor:"transparent",color:T.textSub,marginBottom:"16px" },
+      input: { width:"100%",padding:"12px 14px",fontSize:"14px",borderRadius:"10px",border:`1px solid ${T.inputBorder}`,boxSizing:"border-box",marginTop:"5px",backgroundColor:T.inputBg,color:T.text },
+      label: { fontSize:"13px",fontWeight:"600",color:T.textMid,display:"block",marginBottom:"12px" },
+      footer: { textAlign:"center",padding:"20px",fontSize:"11px",color:T.textSub }
     };
 
     const inicial = (pubNegocioNombre||"?")[0].toUpperCase();
@@ -758,13 +783,13 @@ function App() {
           {/* PASO 1: servicio */}
           {pubStep===1 && (
             <div>
-              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Qué servicio deseas?</h3>
-              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Elige el servicio que quieres reservar</p>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:T.text,margin:"0 0 4px"}}>¿Qué servicio deseas?</h3>
+              <p style={{fontSize:"13px",color:T.textSub,margin:"0 0 16px"}}>Elige el servicio que quieres reservar</p>
               {pubServicios.length===0 && <p style={{color:"#64748b",fontSize:"14px",textAlign:"center",padding:"20px"}}>Este negocio no tiene servicios disponibles aún.</p>}
               {pubServicios.map(s=>(
                 <button key={s.id} onClick={()=>{ setPubServicioId(s.id); setPubStep(pubProfesionales.length>0?2:3); }} style={PUB.servBtn(pubServicioId===s.id)}>
-                  <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{s.nombre}</div>
-                  <div style={{fontSize:"13px",color:"#64748b",marginTop:"3px",display:"flex",gap:"12px"}}>
+                  <div style={{fontWeight:"700",color:T.text,fontSize:"15px"}}>{s.nombre}</div>
+                  <div style={{fontSize:"13px",color:T.textSub,marginTop:"3px",display:"flex",gap:"12px"}}>
                     <span>⏱ {s.duracion} min</span>
                     <span>💰 ${Number(s.precio).toLocaleString("es-CO")}</span>
                   </div>
@@ -777,21 +802,21 @@ function App() {
           {pubStep===2 && (
             <div>
               <button onClick={()=>setPubStep(1)} style={PUB.btnBack}>← Atrás</button>
-              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Con quién te atiendes?</h3>
-              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Selecciona tu profesional de confianza</p>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:T.text,margin:"0 0 4px"}}>¿Con quién te atiendes?</h3>
+              <p style={{fontSize:"13px",color:T.textSub,margin:"0 0 16px"}}>Selecciona tu profesional de confianza</p>
               <button onClick={()=>{ setPubProfId(""); setPubStep(3); }} style={PUB.profBtn(pubProfId===""&&pubServicioId)}>
                 <div style={{...PUB.profAvatar,backgroundColor:"#475569",fontSize:"20px"}}>✦</div>
                 <div>
-                  <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>Cualquier disponible</div>
-                  <div style={{fontSize:"12px",color:"#64748b"}}>El primero con horario libre</div>
+                  <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>Cualquier disponible</div>
+                  <div style={{fontSize:"12px",color:T.textSub}}>El primero con horario libre</div>
                 </div>
               </button>
               {pubProfesionales.map(p=>(
                 <button key={p.id} onClick={()=>{ setPubProfId(p.id); setPubStep(3); }} style={PUB.profBtn(pubProfId===p.id)}>
                   <div style={PUB.profAvatar}>{p.nombre[0].toUpperCase()}</div>
                   <div>
-                    <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{p.nombre}</div>
-                    {p.especialidad && <div style={{fontSize:"12px",color:"#64748b"}}>{p.especialidad}</div>}
+                    <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>{p.nombre}</div>
+                    {p.especialidad && <div style={{fontSize:"12px",color:T.textSub}}>{p.especialidad}</div>}
                   </div>
                 </button>
               ))}
@@ -802,8 +827,8 @@ function App() {
           {pubStep===3 && (
             <div>
               <button onClick={()=>setPubStep(pubProfesionales.length>0?2:1)} style={PUB.btnBack}>← Atrás</button>
-              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 4px"}}>¿Cuándo te venimos bien?</h3>
-              <p style={{fontSize:"13px",color:"#64748b",margin:"0 0 16px"}}>Elige la fecha y el horario que prefieras</p>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:T.text,margin:"0 0 4px"}}>¿Cuándo te venimos bien?</h3>
+              <p style={{fontSize:"13px",color:T.textSub,margin:"0 0 16px"}}>Elige la fecha y el horario que prefieras</p>
               <label style={PUB.label}>
                 Fecha
                 <input type="date" value={pubFecha} min={hoy()} onChange={e=>{setPubFecha(e.target.value);setPubSlot(null);}} style={PUB.input}/>
@@ -836,7 +861,7 @@ function App() {
           {pubStep===4 && (
             <div>
               <button onClick={()=>setPubStep(3)} style={PUB.btnBack}>← Atrás</button>
-              <h3 style={{fontSize:"17px",fontWeight:"800",color:"#0f172a",margin:"0 0 16px"}}>Casi listo — ¿tus datos?</h3>
+              <h3 style={{fontSize:"17px",fontWeight:"800",color:T.text,margin:"0 0 16px"}}>Casi listo — ¿tus datos?</h3>
               {/* resumen */}
               <div style={{backgroundColor:"#fffbeb",border:"1px solid #fde68a",borderRadius:"10px",padding:"12px",marginBottom:"16px",fontSize:"13px"}}>
                 <div style={{fontWeight:"700",color:"#92400e",marginBottom:"4px"}}>Tu cita:</div>
@@ -870,7 +895,7 @@ function App() {
   // ══════════════════════════════════════════════════════════════════════════
   // PANTALLAS DE ESTADO (cargando / login / suspendido)
   // ══════════════════════════════════════════════════════════════════════════
-  if (cargandoAuth) return <div style={S.page}><p style={{color:"#64748b"}}>Cargando...</p></div>;
+  if (cargandoAuth) return <div style={S.page}><p style={{color:T.textSub}}>Cargando...</p></div>;
 
   // Admin check va primero — nunca debe ver la pantalla de suspensión
   if (esAdmin && usuario) {
@@ -985,6 +1010,27 @@ function App() {
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <div style={S.layout}>
+      <style>{`
+        :root {
+          --dm-text: ${T.text};
+          --dm-sub: ${T.textSub};
+          --dm-mid: ${T.textMid};
+          --dm-muted: ${T.textMuted};
+          --dm-bg: ${T.bg};
+          --dm-surface: ${T.surface};
+          --dm-border: ${T.border};
+        }
+        body { background-color: ${T.bg}; color: ${T.text}; }
+        input, select, textarea {
+          background-color: ${T.inputBg} !important;
+          color: ${T.text} !important;
+          border-color: ${T.inputBorder} !important;
+        }
+        ${darkMode ? `
+          [data-dmtext] { color: ${T.text} !important; }
+          [data-dmsub] { color: ${T.textSub} !important; }
+        ` : ""}
+      `}</style>
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
       <div style={S.sidebar}>
@@ -1153,7 +1199,7 @@ function App() {
                 {/* navegación de fecha */}
                 <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"16px",flexWrap:"wrap"}}>
                   <button onClick={()=>moverFecha(-1)} style={S.btnSecondary}>← Anterior</button>
-                  <span style={{fontWeight:"700",fontSize:"15px",color:"#0f172a",flex:1,textAlign:"center",textTransform:"capitalize"}}>{fechaLarga(fechaAgenda)}</span>
+                  <span style={{fontWeight:"700",fontSize:"15px",color:T.text,flex:1,textAlign:"center",textTransform:"capitalize"}}>{fechaLarga(fechaAgenda)}</span>
                   <button onClick={()=>moverFecha(1)} style={S.btnSecondary}>Siguiente →</button>
                 </div>
 
@@ -1188,8 +1234,8 @@ function App() {
                           {hora12(c.hora_inicio)}
                         </div>
                         <div style={{flex:1,minWidth:"120px"}}>
-                          <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{c.cliente_nombre}</div>
-                          <div style={{fontSize:"12px",color:"#64748b",marginTop:"2px"}}>
+                          <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>{c.cliente_nombre}</div>
+                          <div style={{fontSize:"12px",color:T.textSub,marginTop:"2px"}}>
                             {c.servicio_nombre} · {c.servicio_duracion} min
                             {c.profesional_nombre&&c.profesional_nombre!=="Sin asignar"&&<> · <strong>{c.profesional_nombre}</strong></>}
                           </div>
@@ -1216,7 +1262,7 @@ function App() {
                   {/* fecha con navegación */}
                   <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"16px"}}>
                     <button onClick={()=>moverFecha(-1)} style={S.btnSecondary}>←</button>
-                    <input type="date" value={fechaAgenda} onChange={e=>setFechaAgenda(e.target.value)} style={{...S.input,flex:1,fontWeight:"700",color:"#0f172a"}}/>
+                    <input type="date" value={fechaAgenda} onChange={e=>setFechaAgenda(e.target.value)} style={{...S.input,flex:1,fontWeight:"700"}}/>
                     <button onClick={()=>moverFecha(1)} style={S.btnSecondary}>→</button>
                   </div>
 
@@ -1298,8 +1344,8 @@ function App() {
                       />
                     </div>
                     <div style={{flex:1,minWidth:"180px"}}>
-                      <p style={{fontWeight:"700",color:"#0f172a",fontSize:"13px",margin:"0 0 6px"}}>Cómo usarlo:</p>
-                      <ol style={{fontSize:"12px",color:"#475569",paddingLeft:"16px",margin:"0 0 14px",lineHeight:"2"}}>
+                      <p style={{fontWeight:"700",color:T.text,fontSize:"13px",margin:"0 0 6px"}}>Cómo usarlo:</p>
+                      <ol style={{fontSize:"12px",color:T.textMuted,paddingLeft:"16px",margin:"0 0 14px",lineHeight:"2"}}>
                         <li>Imprime el QR o descárgalo</li>
                         <li>El cliente lo escanea con su cámara</li>
                         <li>Elige servicio, profesional, día y hora</li>
@@ -1479,8 +1525,8 @@ function App() {
                     <div key={v.id} style={{...S.card,padding:"14px 16px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
                         <div style={{flex:1,minWidth:"120px"}}>
-                          <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{v.cliente_nombre}</div>
-                          {v.cliente_celular !== "N/A" && <div style={{fontSize:"12px",color:"#64748b"}}>{v.cliente_celular}</div>}
+                          <div style={{fontWeight:"700",color:T.text,fontSize:"15px"}}>{v.cliente_nombre}</div>
+                          {v.cliente_celular !== "N/A" && <div style={{fontSize:"12px",color:T.textSub}}>{v.cliente_celular}</div>}
                         </div>
                         <div style={{backgroundColor:bg,color,borderRadius:"10px",padding:"8px 16px",fontWeight:"800",fontSize:"20px",textAlign:"center",minWidth:"70px"}}>
                           {v.saldo}
@@ -1564,8 +1610,8 @@ function App() {
                   {fiados.map(f => (
                     <div key={f.id} onClick={()=>abrirFiado(f)} style={{...S.card,padding:"12px 14px",cursor:"pointer",border:fiadoAbierto?.id===f.id?"2px solid #0f172a":"1px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                       <div>
-                        <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{f.cliente_nombre}</div>
-                        {f.cliente_celular !== "N/A" && <div style={{fontSize:"11px",color:"#94a3b8"}}>{f.cliente_celular}</div>}
+                        <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>{f.cliente_nombre}</div>
+                        {f.cliente_celular !== "N/A" && <div style={{fontSize:"11px",color:T.textSub}}>{f.cliente_celular}</div>}
                       </div>
                       <div style={{textAlign:"right"}}>
                         <div style={{fontWeight:"800",fontSize:"15px",color:f.deuda>0?"#dc2626":"#16a34a"}}>${Number(f.deuda||0).toLocaleString("es-CO")}</div>
