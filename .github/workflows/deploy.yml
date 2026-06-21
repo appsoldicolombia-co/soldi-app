@@ -21,18 +21,17 @@ jobs:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
         run: |
           if [ -z "$SA" ]; then
-            echo "❌ El secret FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 está VACÍO o no existe en este repo"
+            echo "❌ Secret VACÍO — no fue guardado o el nombre no coincide"
             exit 1
           fi
-          CHARS=$(echo -n "$SA" | wc -c)
-          echo "✅ Secret encontrado — $CHARS caracteres"
-          # Verificar que es JSON válido
-          if echo "$SA" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
-            echo "✅ El JSON es válido"
-          else
-            echo "❌ El contenido NO es JSON válido — verifica que copiaste todo el archivo .json"
+          echo "✅ Secret tiene ${#SA} caracteres"
+          PROJECT=$(echo "$SA" | jq -r '.project_id // empty' 2>/dev/null)
+          TYPE=$(echo "$SA" | jq -r '.type // empty' 2>/dev/null)
+          if [ -z "$TYPE" ]; then
+            echo "❌ JSON inválido — verifica que copiaste el archivo completo (debe empezar con { y terminar con })"
             exit 1
           fi
+          echo "✅ JSON válido — tipo: $TYPE, proyecto: $PROJECT"
 
       - name: Instalar dependencias
         run: npm ci
