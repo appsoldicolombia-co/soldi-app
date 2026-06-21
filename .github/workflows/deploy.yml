@@ -25,16 +25,6 @@ jobs:
       - name: Deploy a Firebase Hosting
         env:
           SA_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
-          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
         run: |
-          if [ -n "$SA_JSON" ]; then
-            echo "Usando service account..."
-            printf '%s' "$SA_JSON" > /tmp/sa.json
-            GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
-          elif [ -n "$FIREBASE_TOKEN" ]; then
-            echo "Usando FIREBASE_TOKEN..."
-            npx firebase-tools@12 deploy --only hosting --project sodi-8b6d2 --non-interactive
-          else
-            echo "❌ No hay credenciales configuradas"
-            exit 1
-          fi
+          printf '%s' "$SA_JSON" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
