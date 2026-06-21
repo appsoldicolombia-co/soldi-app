@@ -48,6 +48,15 @@ function App() {
     return () => mq.removeEventListener("change", h);
   }, []);
 
+  // responsive
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+
   // auth / negocio
   const [usuario, setUsuario] = useState(null);
   const [negocioActivo, setNegocioActivo] = useState(true);
@@ -634,14 +643,16 @@ function App() {
 
   const S = {
     page:{ minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",backgroundColor:T.bg,fontFamily:"system-ui,sans-serif",padding:"16px",boxSizing:"border-box" },
-    layout:{ display:"flex",flexWrap:"wrap",minHeight:"100vh",backgroundColor:T.bg,fontFamily:"system-ui,sans-serif" },
-    sidebar:{ width:"100%",minWidth:"220px",flex:"1 1 220px",backgroundColor:"#0f172a",color:"#fff",display:"flex",flexDirection:"column",padding:"20px 14px",boxSizing:"border-box",gap:"2px" },
+    layout:{ display:"flex",flexDirection:"row",minHeight:"100vh",backgroundColor:T.bg,fontFamily:"system-ui,sans-serif" },
+    sidebar:{ width:"220px",minWidth:"220px",flexShrink:0,backgroundColor:"#0f172a",color:"#fff",display:"flex",flexDirection:"column",padding:"20px 14px",boxSizing:"border-box",gap:"2px",
+      ...(isMobile ? { position:"fixed",top:0,left:menuAbierto?0:"-240px",height:"100vh",zIndex:200,transition:"left 0.25s ease",overflowY:"auto" } : { position:"sticky",top:0,height:"100vh",overflowY:"auto" })
+    },
     logo:{ fontSize:"20px",fontWeight:"800",marginBottom:"20px",paddingLeft:"10px",display:"flex",alignItems:"baseline",gap:"5px" },
     vTag:{ fontSize:"9px",color:"#475569",fontWeight:"400" },
     mCat:{ fontSize:"10px",fontWeight:"700",color:"#334155",textTransform:"uppercase",padding:"14px 10px 4px",letterSpacing:"0.5px" },
     mBtn:(a)=>({ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"none",backgroundColor:a?"#1e293b":"transparent",color:a?"#fff":"#94a3b8",textAlign:"left",fontSize:"13px",fontWeight:"600",cursor:"pointer" }),
     logoutBtn:{ width:"100%",padding:"10px 14px",borderRadius:"6px",border:"1px solid #1e293b",backgroundColor:"transparent",color:"#94a3b8",fontSize:"12px",fontWeight:"500",cursor:"pointer",marginTop:"auto" },
-    main:{ flex:"1 1 320px",padding:"24px 20px",boxSizing:"border-box" },
+    main:{ flex:1,minWidth:0,padding:isMobile?"68px 14px 24px":"24px 20px",boxSizing:"border-box",overflowX:"hidden" },
     card:{ backgroundColor:T.surface,borderRadius:"10px",border:`1px solid ${T.border}`,boxShadow:darkMode?"0 1px 3px rgba(0,0,0,0.3)":"0 1px 3px rgba(0,0,0,0.05)",padding:"20px",boxSizing:"border-box" },
     h1:{ fontSize:"20px",fontWeight:"700",color:T.text,margin:"0 0 4px 0" },
     sub:{ fontSize:"13px",color:T.textSub,margin:"0 0 20px 0" },
@@ -1004,12 +1015,27 @@ function App() {
     .filter(c=>filtroProfAgenda==="todos"||c.profesional_id===filtroProfAgenda)
     .sort((a,b)=>a.hora_inicio.localeCompare(b.hora_inicio));
   const urlPublica = `${window.location.origin}${window.location.pathname}?b=${usuario.uid}`;
+  const ir = (seccion, extra) => { setSeccionActiva(seccion); if (extra) extra(); setMenuAbierto(false); };
 
   // ══════════════════════════════════════════════════════════════════════════
   // RENDER PRINCIPAL
   // ══════════════════════════════════════════════════════════════════════════
   return (
     <div style={S.layout}>
+      {/* ── BARRA MÓVIL ────────────────────────────────────────────── */}
+      {isMobile && (
+        <div style={{position:"fixed",top:0,left:0,right:0,height:"52px",backgroundColor:"#0f172a",display:"flex",alignItems:"center",padding:"0 14px",zIndex:201,gap:"12px"}}>
+          <button onClick={()=>setMenuAbierto(!menuAbierto)} style={{background:"none",border:"none",color:"#fff",fontSize:"22px",cursor:"pointer",padding:"4px",lineHeight:1}}>☰</button>
+          <span style={{fontWeight:"800",fontSize:"18px",color:"#fff",flex:1}}>Soldi</span>
+          <button onClick={cerrarSesion} style={{background:"none",border:"1px solid #334155",borderRadius:"6px",color:"#94a3b8",fontSize:"11px",fontWeight:"600",padding:"5px 10px",cursor:"pointer"}}>Salir</button>
+        </div>
+      )}
+
+      {/* ── OVERLAY ────────────────────────────────────────────────── */}
+      {isMobile && menuAbierto && (
+        <div onClick={()=>setMenuAbierto(false)} style={{position:"fixed",inset:0,backgroundColor:"rgba(0,0,0,0.55)",zIndex:199}}/>
+      )}
+
       <style>{`
         :root {
           --dm-text: ${T.text};
@@ -1034,35 +1060,38 @@ function App() {
 
       {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
       <div style={S.sidebar}>
-        <div style={S.logo}>Soldi <span style={S.vTag}>1.2</span></div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"20px",paddingLeft:"10px"}}>
+          <div style={S.logo}>Soldi <span style={S.vTag}>1.2</span></div>
+          {isMobile && <button onClick={()=>setMenuAbierto(false)} style={{background:"none",border:"none",color:"#94a3b8",fontSize:"20px",cursor:"pointer",lineHeight:1,padding:"2px 6px"}}>✕</button>}
+        </div>
 
         <p style={S.mCat}>Ventas</p>
-        <button style={S.mBtn(seccionActiva==="dashboard")} onClick={()=>setSeccionActiva("dashboard")}>Dashboard</button>
-        <button style={S.mBtn(seccionActiva==="registrar")} onClick={()=>setSeccionActiva("registrar")}>Registrar Venta</button>
-        <button style={S.mBtn(seccionActiva==="historial")} onClick={()=>setSeccionActiva("historial")}>Historial de Ventas</button>
+        <button style={S.mBtn(seccionActiva==="dashboard")} onClick={()=>ir("dashboard")}>Dashboard</button>
+        <button style={S.mBtn(seccionActiva==="registrar")} onClick={()=>ir("registrar")}>Registrar Venta</button>
+        <button style={S.mBtn(seccionActiva==="historial")} onClick={()=>ir("historial")}>Historial de Ventas</button>
 
         {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <>
           <p style={S.mCat}>Agenda</p>
-          <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>{ setSeccionActiva("agenda"); setTabAgenda(0); }}>Agenda de Citas</button>
-          <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>setSeccionActiva("servicios")}>Catálogo de Servicios</button>
-          <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>setSeccionActiva("profesionales")}>Profesionales</button>
+          <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>ir("agenda",()=>setTabAgenda(0))}>Agenda de Citas</button>
+          <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>ir("servicios")}>Catálogo de Servicios</button>
+          <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>ir("profesionales")}>Profesionales</button>
         </>}
 
         {tipoNegocio === "restaurante" && <>
           <p style={S.mCat}>Restaurante</p>
-          <button style={S.mBtn(seccionActiva==="valeras")} onClick={()=>setSeccionActiva("valeras")}>Sistema de Valeras</button>
+          <button style={S.mBtn(seccionActiva==="valeras")} onClick={()=>ir("valeras")}>Sistema de Valeras</button>
         </>}
 
         {tipoNegocio === "tienda" && <>
           <p style={S.mCat}>Tienda</p>
-          <button style={S.mBtn(seccionActiva==="fiar")} onClick={()=>setSeccionActiva("fiar")}>Sistema de Fiar</button>
+          <button style={S.mBtn(seccionActiva==="fiar")} onClick={()=>ir("fiar")}>Sistema de Fiar</button>
         </>}
 
         <p style={S.mCat}>Ajustes</p>
-        <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>setSeccionActiva("perfil")}>Perfil del Negocio</button>
-        {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>}
+        <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>ir("perfil")}>Perfil del Negocio</button>
+        {tipoNegocio !== "restaurante" && tipoNegocio !== "tienda" && <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>ir("configuracion")}>Horario de Atención</button>}
 
-        <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>
+        {!isMobile && <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>}
       </div>
 
       {/* ── CONTENIDO ───────────────────────────────────────────────────── */}
