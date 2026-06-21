@@ -57,6 +57,14 @@ function App() {
     return () => window.removeEventListener("resize", h);
   }, []);
 
+  // cargar datos del dashboard cuando se entra a la sección o cambia el mes
+  useEffect(() => {
+    if (seccionActiva === "dashboard" && usuario && !esAdmin) {
+      cargarDashboard(dashMes);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seccionActiva, dashMes, usuario]);
+
   // auth / negocio
   const [usuario, setUsuario] = useState(null);
   const [negocioActivo, setNegocioActivo] = useState(true);
@@ -69,6 +77,11 @@ function App() {
 
   // métricas
   const [metricasMes, setMetricasMes] = useState({ total_ventas: 0, cantidad_transacciones: 0 });
+
+  // dashboard analytics
+  const [dashMes, setDashMes] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; });
+  const [facturasDash, setFacturasDash] = useState([]);
+  const [cargandoDash, setCargandoDash] = useState(false);
 
   // historial
   const [facturas, setFacturas] = useState([]);
@@ -294,6 +307,25 @@ function App() {
       .catch(console.error)
       .finally(() => setCargandoCitas(false));
   }, [usuario, fechaAgenda, seccionActiva]);
+
+  // ── dashboard analytics ──────────────────────────────────────────────────
+  const cargarDashboard = async (mes, uid) => {
+    const u = uid || (usuario?.uid);
+    if (!u) return;
+    setCargandoDash(true);
+    try {
+      const [y, m] = mes.split("-").map(Number);
+      const inicio = new Date(y, m-1, 1);
+      const fin    = new Date(y, m,   1);
+      const snap = await getDocs(query(
+        collection(db, `negocios/${u}/facturas`),
+        where("fecha_creacion",">=", inicio),
+        where("fecha_creacion","<",  fin),
+        orderBy("fecha_creacion","desc")
+      ));
+      setFacturasDash(snap.docs.map(d => ({ id:d.id,...d.data() })));
+    } catch(e){ console.error(e); } finally { setCargandoDash(false); }
+  };
 
   // ── historial ────────────────────────────────────────────────────────────
   const cargarPrimerasFacturas = async (uid) => {
@@ -1100,16 +1132,207 @@ function App() {
       <div style={S.main}>
 
         {/* ─── DASHBOARD ─────────────────────────────────────────────────── */}
-        {seccionActiva==="dashboard" && (
-          <div>
-            <h1 style={S.h1}>Dashboard</h1>
-            <p style={S.sub}>Resumen del periodo de facturación activo.</p>
-            <div style={S.kpiGrid}>
-              <div style={S.kpiCard}><p style={S.kpiLabel}>Facturación del Mes</p><h3 style={S.kpiVal}>${Number(metricasMes.total_ventas||0).toLocaleString("es-CO",{minimumFractionDigits:2})}</h3></div>
-              <div style={S.kpiCard}><p style={S.kpiLabel}>Transacciones</p><h3 style={S.kpiVal}>{metricasMes.cantidad_transacciones||0}</h3></div>
+        {seccionActiva==="dashboard" && (() => {
+          // ── analytics ────────────────────────────────────────────────────
+          const fmtCOP = n => `$${Number(n).toLocaleString("es-CO")}`;
+          const total  = facturasDash.reduce((s,f)=>s+Number(f.venta?.monto_total||0),0);
+          const count  = facturasDash.length;
+          const avg    = count>0 ? total/count : 0;
+
+          // canales de pago
+          const coloresMetodo = { Efectivo:"#16a34a", Nequi:"#7c3aed", Daviplata:"#0ea5e9", Bancolombia:"#d97706", Tarjeta:"#dc2626" };
+          const porMetodo = {};
+          facturasDash.forEach(f=>{ const m=f.venta?.metodo_pago||"Otro"; porMetodo[m]=(porMetodo[m]||0)+Number(f.venta?.monto_total||0); });
+          const metodoList = Object.entries(porMetodo).sort((a,b)=>b[1]-a[1]);
+          const maxMetodo  = metodoList[0]?.[1]||1;
+
+          // top productos
+          const porProd = {};
+          facturasDash.forEach(f=>{ const c=f.venta?.concepto||"Sin concepto"; if(!porProd[c]) porProd[c]={n:0,t:0}; porProd[c].n++; porProd[c].t+=Number(f.venta?.monto_total||0); });
+          const prodList = Object.entries(porProd).sort((a,b)=>b[1].t-a[1].t).slice(0,7);
+          const maxProd  = prodList[0]?.[1].t||1;
+
+          // top clientes (excluye anónimos)
+          const porCli = {};
+          facturasDash.forEach(f=>{ const n=(f.cliente?.nombre||"").trim(); if(!n||n==="Cuantías Menores"||n==="Sin nombre") return; if(!porCli[n]) porCli[n]={n:0,t:0}; porCli[n].n++; porCli[n].t+=Number(f.venta?.monto_total||0); });
+          const cliList = Object.entries(porCli).sort((a,b)=>b[1].t-a[1].t).slice(0,6);
+          const maxCli  = cliList[0]?.[1].t||1;
+
+          // por día de semana
+          const DIAS=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
+          const porDia=Array(7).fill(0);
+          facturasDash.forEach(f=>{ const ts=f.fecha_creacion?.seconds?new Date(f.fecha_creacion.seconds*1000):null; if(ts) porDia[ts.getDay()]++; });
+          const maxDia=Math.max(...porDia,1);
+          const mejorDia=porDia.some(v=>v>0)?DIAS[porDia.indexOf(Math.max(...porDia))]:"—";
+
+          // por hora
+          const porHora=Array(24).fill(0);
+          facturasDash.forEach(f=>{ const ts=f.fecha_creacion?.seconds?new Date(f.fecha_creacion.seconds*1000):null; if(ts) porHora[ts.getHours()]++; });
+          const horasActivas=porHora.map((v,h)=>({h,v})).filter(x=>x.v>0);
+          const maxHora=Math.max(...porHora,1);
+          const mejorHora=horasActivas.length>0?horasActivas.reduce((a,b)=>b.v>a.v?b:a):null;
+          const fmtHora=h=>h===0?"12am":h<12?`${h}am`:h===12?"12pm":`${h-12}pm`;
+
+          // meses disponibles para el selector (últimos 24 meses)
+          const mesesOpc=[];
+          const ahora=new Date();
+          for(let i=0;i<24;i++){
+            const d=new Date(ahora.getFullYear(),ahora.getMonth()-i,1);
+            const v=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+            const l=d.toLocaleDateString("es-CO",{month:"long",year:"numeric"});
+            mesesOpc.push({v,l});
+          }
+
+          const Barra=({pct,color="#2563eb",h=8})=>(
+            <div style={{flex:1,height:`${h}px`,backgroundColor:T.border,borderRadius:"99px",overflow:"hidden"}}>
+              <div style={{width:`${Math.max(pct,2)}%`,height:"100%",backgroundColor:color,borderRadius:"99px",transition:"width 0.5s ease"}}/>
             </div>
-          </div>
-        )}
+          );
+          const SecTitle=({children})=>(
+            <h3 style={{fontSize:"13px",fontWeight:"700",color:T.textSub,textTransform:"uppercase",letterSpacing:"0.06em",margin:"0 0 14px"}}>{children}</h3>
+          );
+          const Panel=({children,style})=>(
+            <div style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"20px",...style}}>{children}</div>
+          );
+
+          return (
+            <div>
+              {/* encabezado + selector de mes */}
+              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:"12px",marginBottom:"20px"}}>
+                <div>
+                  <h1 style={{...S.h1,marginBottom:"4px"}}>Analytics</h1>
+                  <p style={{...S.sub,margin:0}}>Inteligencia de negocio por periodo.</p>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
+                  <select value={dashMes} onChange={e=>setDashMes(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"8px 12px"}}>
+                    {mesesOpc.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+                  </select>
+                  {cargandoDash && <span style={{fontSize:"12px",color:T.textSub}}>Cargando...</span>}
+                </div>
+              </div>
+
+              {count===0 && !cargandoDash && (
+                <Panel><p style={{color:T.textSub,fontSize:"13px",textAlign:"center",padding:"20px 0",margin:0}}>No hay ventas registradas en este periodo.</p></Panel>
+              )}
+
+              {count>0 && <>
+                {/* ── KPIs ── */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:"12px",marginBottom:"20px"}}>
+                  {[
+                    {l:"Total facturado",v:fmtCOP(total),c:"#2563eb"},
+                    {l:"Transacciones",v:count,c:"#0891b2"},
+                    {l:"Ticket promedio",v:fmtCOP(Math.round(avg)),c:"#7c3aed"},
+                    {l:"Día más activo",v:mejorDia,c:"#16a34a"},
+                    ...(mejorHora?[{l:"Hora pico",v:fmtHora(mejorHora.h),c:"#d97706"}]:[]),
+                  ].map(k=>(
+                    <div key={k.l} style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"16px"}}>
+                      <p style={{fontSize:"11px",fontWeight:"600",color:T.textSub,margin:"0 0 6px",textTransform:"uppercase",letterSpacing:"0.05em"}}>{k.l}</p>
+                      <p style={{fontSize:"22px",fontWeight:"800",color:k.c,margin:0}}>{k.v}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── fila principal ── */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"16px",marginBottom:"16px"}}>
+
+                  {/* Canales de pago */}
+                  <Panel>
+                    <SecTitle>Canales de Pago</SecTitle>
+                    {metodoList.map(([m,t])=>(
+                      <div key={m} style={{marginBottom:"14px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
+                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text}}>{m}</span>
+                          <div style={{textAlign:"right"}}>
+                            <span style={{fontSize:"13px",fontWeight:"700",color:T.text}}>{fmtCOP(t)}</span>
+                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"6px"}}>{Math.round(t/total*100)}%</span>
+                          </div>
+                        </div>
+                        <Barra pct={t/maxMetodo*100} color={coloresMetodo[m]||"#64748b"} h={10}/>
+                      </div>
+                    ))}
+                  </Panel>
+
+                  {/* Top productos */}
+                  <Panel>
+                    <SecTitle>Top {tipoNegocio==="barberia"?"Servicios":"Productos"}</SecTitle>
+                    {prodList.map(([c,d],i)=>(
+                      <div key={c} style={{marginBottom:"12px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
+                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{i+1}. {c}</span>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
+                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n}x</span>
+                          </div>
+                        </div>
+                        <Barra pct={d.t/maxProd*100} color="#2563eb" h={7}/>
+                      </div>
+                    ))}
+                  </Panel>
+                </div>
+
+                {/* ── fila secundaria ── */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"16px",marginBottom:"16px"}}>
+
+                  {/* Top clientes */}
+                  {cliList.length>0 && (
+                    <Panel>
+                      <SecTitle>Top Clientes</SecTitle>
+                      {cliList.map(([n,d],i)=>(
+                        <div key={n} style={{marginBottom:"12px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
+                            <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                              <span style={{display:"inline-block",width:"18px",height:"18px",backgroundColor:["#fbbf24","#94a3b8","#cd7c3f","#64748b","#64748b"][i]||T.border,borderRadius:"50%",textAlign:"center",lineHeight:"18px",fontSize:"10px",fontWeight:"800",color:"#fff",marginRight:"6px"}}>{i+1}</span>
+                              {n}
+                            </span>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
+                              <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} visita{d.n!==1?"s":""}</span>
+                            </div>
+                          </div>
+                          <Barra pct={d.t/maxCli*100} color="#7c3aed" h={7}/>
+                        </div>
+                      ))}
+                    </Panel>
+                  )}
+
+                  {/* Ventas por día de semana */}
+                  <Panel>
+                    <SecTitle>Ventas por Día</SecTitle>
+                    {DIAS.map((d,i)=>(
+                      <div key={d} style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px"}}>
+                        <span style={{fontSize:"12px",fontWeight:"600",color:porDia[i]>0?T.text:T.textSub,width:"28px",flexShrink:0}}>{d}</span>
+                        <Barra pct={porDia[i]/maxDia*100} color={porDia[i]===Math.max(...porDia)?"#16a34a":"#0ea5e9"} h={8}/>
+                        <span style={{fontSize:"12px",fontWeight:"700",color:T.text,width:"20px",textAlign:"right",flexShrink:0}}>{porDia[i]}</span>
+                      </div>
+                    ))}
+                  </Panel>
+                </div>
+
+                {/* Ventas por hora */}
+                {horasActivas.length>0 && (
+                  <Panel>
+                    <SecTitle>Flujo de Ventas por Hora</SecTitle>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(68px,1fr))",gap:"8px"}}>
+                      {horasActivas.map(({h,v})=>{
+                        const pct=v/maxHora;
+                        const clr=pct>=0.8?"#dc2626":pct>=0.5?"#d97706":"#2563eb";
+                        return (
+                          <div key={h} style={{textAlign:"center"}}>
+                            <div style={{height:"60px",display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:"4px"}}>
+                              <div style={{width:"32px",backgroundColor:clr,borderRadius:"4px 4px 0 0",height:`${Math.round(pct*60)}px`,minHeight:"4px",transition:"height 0.5s ease"}}/>
+                            </div>
+                            <div style={{fontSize:"11px",fontWeight:"700",color:T.text}}>{v}</div>
+                            <div style={{fontSize:"10px",color:T.textSub}}>{fmtHora(h)}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Panel>
+                )}
+              </>}
+            </div>
+          );
+        })()}
 
         {/* ─── POS ────────────────────────────────────────────────────────── */}
         {seccionActiva==="registrar" && (
