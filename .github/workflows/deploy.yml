@@ -16,33 +16,13 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Verificar secret
-        env:
-          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
-        run: |
-          if [ -z "$SA" ]; then
-            echo "❌ Secret VACÍO — no fue guardado o el nombre no coincide"
-            exit 1
-          fi
-          echo "✅ Secret tiene ${#SA} caracteres"
-          PROJECT=$(echo "$SA" | jq -r '.project_id // empty' 2>/dev/null)
-          TYPE=$(echo "$SA" | jq -r '.type // empty' 2>/dev/null)
-          if [ -z "$TYPE" ]; then
-            echo "❌ JSON inválido — verifica que copiaste el archivo completo (debe empezar con { y terminar con })"
-            exit 1
-          fi
-          echo "✅ JSON válido — tipo: $TYPE, proyecto: $PROJECT"
-
       - name: Instalar dependencias
         run: npm ci
 
       - name: Build
         run: npm run build
 
-      - name: Autenticar con Google Cloud
-        uses: google-github-actions/auth@v2
-        with:
-          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_SODI_8B6D2 }}
-
       - name: Deploy a Firebase Hosting
         run: npx firebase-tools@latest deploy --only hosting --project sodi-8b6d2 --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
