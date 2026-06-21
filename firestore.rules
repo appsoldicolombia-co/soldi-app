@@ -2,40 +2,28 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Dueño autenticado: acceso total a su negocio ──────────────────────
+    function isAdmin() {
+      return request.auth != null && request.auth.token.email == "admin@soldi.co";
+    }
+
+    // Admin tiene acceso total a todo
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Dueño autenticado: acceso total a su negocio
     match /negocios/{negocioId} {
       allow read, write: if request.auth != null && request.auth.uid == negocioId;
     }
-
     match /negocios/{negocioId}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == negocioId;
     }
 
-    // ── Acceso público para el enlace de reservas en línea ────────────────
-    // Nombre del negocio (para mostrar en la pantalla de booking)
-    match /negocios/{negocioId} {
-      allow read: if true;
-    }
-
-    // Servicios (para que el cliente los seleccione)
-    match /negocios/{negocioId}/servicios/{docId} {
-      allow read: if true;
-    }
-
-    // Profesionales (para que el cliente elija con quién)
-    match /negocios/{negocioId}/profesionales/{docId} {
-      allow read: if true;
-    }
-
-    // Configuración de agenda (para generar los horarios disponibles)
-    match /negocios/{negocioId}/configuracion/{docId} {
-      allow read: if true;
-    }
-
-    // Citas: el público puede leer (verificar disponibilidad) y crear (reservar)
-    // Solo el dueño puede actualizar o cancelar (cubierto por la regla del dueño arriba)
-    match /negocios/{negocioId}/citas/{docId} {
-      allow read, create: if true;
-    }
+    // Acceso público para el enlace de reservas
+    match /negocios/{negocioId} { allow read: if true; }
+    match /negocios/{negocioId}/servicios/{docId} { allow read: if true; }
+    match /negocios/{negocioId}/profesionales/{docId} { allow read: if true; }
+    match /negocios/{negocioId}/configuracion/{docId} { allow read: if true; }
+    match /negocios/{negocioId}/citas/{docId} { allow read, create: if true; }
   }
 }

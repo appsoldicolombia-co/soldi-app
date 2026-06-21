@@ -127,6 +127,28 @@ function App() {
   const [perfilNegocio, setPerfilNegocio] = useState({ nombre_comercial: "", tagline: "", logo_url: "" });
   const [guardandoPerfil, setGuardandoPerfil] = useState(false);
 
+  // tipo de negocio y admin
+  const [tipoNegocio, setTipoNegocio] = useState("barberia");
+  const [esAdmin, setEsAdmin] = useState(false);
+  const [negociosList, setNegociosList] = useState([]);
+  const [cargandoNegocios, setCargandoNegocios] = useState(false);
+
+  // valeras (restaurante)
+  const [valeras, setValeras] = useState([]);
+  const [nuevaValera, setNuevaValera] = useState({ nombre: "", celular: "", cantidad: "10" });
+  const [guardandoValera, setGuardandoValera] = useState(false);
+  const [recargaVal, setRecargaVal] = useState({});
+
+  // fiar (tienda)
+  const [fiados, setFiados] = useState([]);
+  const [nuevoFiado, setNuevoFiado] = useState({ nombre: "", celular: "" });
+  const [guardandoFiado, setGuardandoFiado] = useState(false);
+  const [fiadoAbierto, setFiadoAbierto] = useState(null);
+  const [movFiado, setMovFiado] = useState({ tipo: "cargo", concepto: "", monto: "" });
+  const [guardandoMovFiado, setGuardandoMovFiado] = useState(false);
+  const [movimientos, setMovimientos] = useState([]);
+  const [cargandoMovs, setCargandoMovs] = useState(false);
+
   // ── detectar modo público ──────────────────────────────────────────────────
   useEffect(() => {
     const bid = new URLSearchParams(window.location.search).get("b");
@@ -186,9 +208,24 @@ function App() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setUsuario(user);
       if (user) {
+        const isAdminUser = user.email === "admin@soldi.co";
+        setEsAdmin(isAdminUser);
+
+        if (isAdminUser) {
+          setNegocioActivo(true);
+          setCargandoAuth(false);
+          setCargandoNegocios(true);
+          getDocs(collection(db, "negocios"))
+            .then(snap => setNegociosList(snap.docs.map(d => ({ id: d.id, ...d.data() }))))
+            .catch(console.error)
+            .finally(() => setCargandoNegocios(false));
+          return;
+        }
+
         const u1 = onSnapshot(doc(db, "negocios", user.uid), (s) => {
           const data = s.data() || {};
           setNegocioActivo(s.exists() ? data.activo !== false : true);
+          setTipoNegocio(data.tipo_negocio || "barberia");
           setPerfilNegocio({
             nombre_comercial: data.nombre_comercial || "",
             tagline: data.tagline || "",
@@ -213,8 +250,16 @@ function App() {
           if (s.exists()) setConfigAgenda(s.data());
         }, console.error);
 
+        const u6 = onSnapshot(query(collection(db, `negocios/${user.uid}/valeras`), orderBy("cliente_nombre")), (s) => {
+          setValeras(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, console.error);
+
+        const u7 = onSnapshot(query(collection(db, `negocios/${user.uid}/fiados`), orderBy("cliente_nombre")), (s) => {
+          setFiados(s.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, console.error);
+
         cargarPrimerasFacturas(user.uid);
-        return () => { u1(); u2(); u3(); u4(); u5(); };
+        return () => { u1(); u2(); u3(); u4(); u5(); u6(); u7(); };
       } else { setCargandoAuth(false); }
     });
     return () => unsub();
@@ -277,6 +322,8 @@ function App() {
     setFacturas([]); setUltimoDoc(null);
     setServicios([]); setProfesionales([]); setCitasDelDia([]);
     setSeccionActiva("dashboard"); setNegocioActivo(true);
+    setEsAdmin(false); setNegociosList([]); setTipoNegocio("barberia");
+    setValeras([]); setFiados([]); setFiadoAbierto(null); setMovimientos([]);
   };
 
   // ── POS ──────────────────────────────────────────────────────────────────
@@ -347,6 +394,116 @@ function App() {
   const eliminarProfesional = async (id) => {
     if (!usuario||!window.confirm("¿Eliminar este profesional?")) return;
     await deleteDoc(doc(db,`negocios/${usuario.uid}/profesionales`,id)).catch(()=>alert("Error al eliminar."));
+  };
+
+  // ── admin ─────────────────────────────────────────────────────────────────
+  const refrescarNegocios = async () => {
+    setCargandoNegocios(true);
+    try {
+      const snap = await getDocs(collection(db, "negocios"));
+      setNegociosList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch(e) { console.error(e); }
+    finally { setCargandoNegocios(false); }
+  };
+
+  const toggleActivoAdmin = async (uid, activo) => {
+    await setDoc(doc(db, "negocios", uid), { activo: !activo }, { merge: true });
+    setNegociosList(prev => prev.map(n => n.id === uid ? { ...n, activo: !activo } : n));
+  };
+
+  const cambiarTipoAdmin = async (uid, tipo) => {
+    await setDoc(doc(db, "negocios", uid), { tipo_negocio: tipo }, { merge: true });
+    setNegociosList(prev => prev.map(n => n.id === uid ? { ...n, tipo_negocio: tipo } : n));
+  };
+
+  // ── valeras (restaurante) ─────────────────────────────────────────────────
+  const crearValera = async (e) => {
+    e.preventDefault();
+    if (!usuario || !nuevaValera.nombre.trim()) return;
+    setGuardandoValera(true);
+    try {
+      await addDoc(collection(db, `negocios/${usuario.uid}/valeras`), {
+        cliente_nombre: nuevaValera.nombre.trim(),
+        cliente_celular: nuevaValera.celular.trim() || "N/A",
+        saldo: Number(nuevaValera.cantidad) || 10,
+        fecha_creacion: new Date()
+      });
+      setNuevaValera({ nombre: "", celular: "", cantidad: "10" });
+    } catch(e) { alert("Error al crear valera: " + (e.code || e.message)); }
+    finally { setGuardandoValera(false); }
+  };
+
+  const descontarAlmuerzo = async (v) => {
+    if (v.saldo <= 0) return;
+    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), { saldo: v.saldo - 1 }, { merge: true });
+  };
+
+  const recargarValera = async (v) => {
+    const cant = Number(recargaVal[v.id] || 0);
+    if (cant <= 0) return;
+    await setDoc(doc(db, `negocios/${usuario.uid}/valeras`, v.id), { saldo: v.saldo + cant }, { merge: true });
+    setRecargaVal(prev => ({ ...prev, [v.id]: "" }));
+  };
+
+  const eliminarValera = async (id) => {
+    if (!window.confirm("¿Eliminar esta valera?")) return;
+    await deleteDoc(doc(db, `negocios/${usuario.uid}/valeras`, id));
+  };
+
+  // ── fiar (tienda) ─────────────────────────────────────────────────────────
+  const crearFiado = async (e) => {
+    e.preventDefault();
+    if (!usuario || !nuevoFiado.nombre.trim()) return;
+    setGuardandoFiado(true);
+    try {
+      await addDoc(collection(db, `negocios/${usuario.uid}/fiados`), {
+        cliente_nombre: nuevoFiado.nombre.trim(),
+        cliente_celular: nuevoFiado.celular.trim() || "N/A",
+        deuda: 0,
+        fecha_creacion: new Date()
+      });
+      setNuevoFiado({ nombre: "", celular: "" });
+    } catch(e) { alert("Error: " + (e.code || e.message)); }
+    finally { setGuardandoFiado(false); }
+  };
+
+  const abrirFiado = async (fiado) => {
+    setFiadoAbierto(fiado);
+    setCargandoMovs(true);
+    try {
+      const snap = await getDocs(query(collection(db, `negocios/${usuario.uid}/movimientos_fiar`), where("fiado_id", "==", fiado.id)));
+      setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.fecha?.seconds||0) - (a.fecha?.seconds||0)));
+    } catch(e) { console.error(e); }
+    finally { setCargandoMovs(false); }
+  };
+
+  const agregarMovFiado = async () => {
+    if (!usuario || !fiadoAbierto || !movFiado.monto) return;
+    setGuardandoMovFiado(true);
+    try {
+      const monto = Number(movFiado.monto);
+      const delta = movFiado.tipo === "cargo" ? monto : -monto;
+      const nuevaDeuda = (fiadoAbierto.deuda || 0) + delta;
+      await addDoc(collection(db, `negocios/${usuario.uid}/movimientos_fiar`), {
+        fiado_id: fiadoAbierto.id,
+        tipo: movFiado.tipo,
+        concepto: movFiado.concepto.trim() || (movFiado.tipo === "cargo" ? "Fiado" : "Pago"),
+        monto,
+        fecha: new Date()
+      });
+      await setDoc(doc(db, `negocios/${usuario.uid}/fiados`, fiadoAbierto.id), { deuda: nuevaDeuda }, { merge: true });
+      setFiadoAbierto(prev => ({ ...prev, deuda: nuevaDeuda }));
+      setMovFiado({ tipo: "cargo", concepto: "", monto: "" });
+      const snap = await getDocs(query(collection(db, `negocios/${usuario.uid}/movimientos_fiar`), where("fiado_id", "==", fiadoAbierto.id)));
+      setMovimientos(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (b.fecha?.seconds||0) - (a.fecha?.seconds||0)));
+    } catch(e) { alert("Error: " + (e.code || e.message)); }
+    finally { setGuardandoMovFiado(false); }
+  };
+
+  const eliminarFiado = async (id) => {
+    if (!window.confirm("¿Eliminar este fiado?")) return;
+    await deleteDoc(doc(db, `negocios/${usuario.uid}/fiados`, id));
+    if (fiadoAbierto?.id === id) setFiadoAbierto(null);
   };
 
   // ── configuración de agenda ───────────────────────────────────────────────
@@ -730,6 +887,86 @@ function App() {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
+  // PANEL ADMIN
+  // ══════════════════════════════════════════════════════════════════════════
+  if (esAdmin) {
+    const totalActivos = negociosList.filter(n => n.activo !== false).length;
+    const porTipo = negociosList.reduce((acc,n) => { const t = n.tipo_negocio||"barberia"; acc[t]=(acc[t]||0)+1; return acc; }, {});
+    return (
+      <div style={S.layout}>
+        <div style={S.sidebar}>
+          <div style={S.logo}>Soldi <span style={S.vTag}>Admin</span></div>
+          <p style={S.mCat}>Sistema</p>
+          <div style={{padding:"10px 14px",fontSize:"12px",color:"#94a3b8",lineHeight:"1.8"}}>
+            <div>Total: <strong style={{color:"#fff"}}>{negociosList.length}</strong></div>
+            <div>Activos: <strong style={{color:"#22c55e"}}>{totalActivos}</strong></div>
+            <div>Suspendidos: <strong style={{color:"#ef4444"}}>{negociosList.length - totalActivos}</strong></div>
+          </div>
+          <button onClick={refrescarNegocios} disabled={cargandoNegocios} style={{...S.btnSecondary,width:"calc(100% - 28px)",margin:"4px 14px",fontSize:"11px"}}>{cargandoNegocios?"Cargando...":"↻ Refrescar"}</button>
+          <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>
+        </div>
+        <div style={S.main}>
+          <h1 style={S.h1}>Panel de Administración</h1>
+          <p style={S.sub}>Gestión de negocios registrados en Soldi.</p>
+          <div style={S.kpiGrid}>
+            <div style={S.kpiCard}><p style={S.kpiLabel}>Total Negocios</p><h3 style={S.kpiVal}>{negociosList.length}</h3></div>
+            <div style={S.kpiCard}><p style={S.kpiLabel}>Activos</p><h3 style={{...S.kpiVal,color:"#16a34a"}}>{totalActivos}</h3></div>
+            <div style={S.kpiCard}><p style={S.kpiLabel}>Suspendidos</p><h3 style={{...S.kpiVal,color:"#dc2626"}}>{negociosList.length - totalActivos}</h3></div>
+            {Object.entries(porTipo).map(([t,c]) => (
+              <div key={t} style={S.kpiCard}><p style={S.kpiLabel}>{t.charAt(0).toUpperCase()+t.slice(1)}</p><h3 style={S.kpiVal}>{c}</h3></div>
+            ))}
+          </div>
+          <div style={S.card}>
+            {negociosList.length === 0 && !cargandoNegocios && <p style={{color:"#64748b",fontSize:"13px",textAlign:"center",padding:"24px"}}>No hay negocios registrados.</p>}
+            {cargandoNegocios && <p style={{color:"#64748b",fontSize:"13px",textAlign:"center",padding:"24px"}}>Cargando...</p>}
+            {negociosList.length > 0 && (
+              <div style={{overflowX:"auto"}}>
+                <table style={S.table}>
+                  <thead>
+                    <tr>
+                      <th style={S.th}>Negocio</th>
+                      <th style={S.th}>ID / Email</th>
+                      <th style={S.th}>Tipo</th>
+                      <th style={{...S.th,textAlign:"center"}}>Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {negociosList.map(n => (
+                      <tr key={n.id}>
+                        <td style={{...S.td,fontWeight:"700"}}>{n.nombre_comercial || "Sin nombre"}</td>
+                        <td style={{...S.td,fontSize:"11px",color:"#94a3b8",fontFamily:"monospace"}}>{n.id.substring(0,12)}...</td>
+                        <td style={S.td}>
+                          <select
+                            value={n.tipo_negocio || "barberia"}
+                            onChange={e => cambiarTipoAdmin(n.id, e.target.value)}
+                            style={{...S.input,padding:"5px 8px",fontSize:"12px",width:"auto"}}
+                          >
+                            <option value="barberia">Barbería</option>
+                            <option value="restaurante">Restaurante</option>
+                            <option value="tienda">Tienda</option>
+                          </select>
+                        </td>
+                        <td style={{...S.td,textAlign:"center"}}>
+                          <button
+                            onClick={() => toggleActivoAdmin(n.id, n.activo !== false)}
+                            style={{padding:"5px 12px",fontSize:"11px",fontWeight:"700",border:"none",borderRadius:"20px",cursor:"pointer",backgroundColor:n.activo!==false?"#dcfce7":"#fee2e2",color:n.activo!==false?"#166534":"#dc2626"}}
+                          >
+                            {n.activo !== false ? "Activo" : "Suspendido"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
   // VARIABLES DERIVADAS (agenda)
   // ══════════════════════════════════════════════════════════════════════════
   const diaActivo = (configAgenda.dias_activos||[]).includes(nombreDia(fechaAgenda));
@@ -756,14 +993,26 @@ function App() {
         <button style={S.mBtn(seccionActiva==="registrar")} onClick={()=>setSeccionActiva("registrar")}>Registrar Venta</button>
         <button style={S.mBtn(seccionActiva==="historial")} onClick={()=>setSeccionActiva("historial")}>Historial de Ventas</button>
 
-        <p style={S.mCat}>Agenda</p>
-        <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>{ setSeccionActiva("agenda"); setTabAgenda(0); }}>Agenda de Citas</button>
-        <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>setSeccionActiva("servicios")}>Catálogo de Servicios</button>
-        <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>setSeccionActiva("profesionales")}>Profesionales</button>
+        {tipoNegocio === "barberia" && <>
+          <p style={S.mCat}>Agenda</p>
+          <button style={S.mBtn(seccionActiva==="agenda")} onClick={()=>{ setSeccionActiva("agenda"); setTabAgenda(0); }}>Agenda de Citas</button>
+          <button style={S.mBtn(seccionActiva==="servicios")} onClick={()=>setSeccionActiva("servicios")}>Catálogo de Servicios</button>
+          <button style={S.mBtn(seccionActiva==="profesionales")} onClick={()=>setSeccionActiva("profesionales")}>Profesionales</button>
+        </>}
+
+        {tipoNegocio === "restaurante" && <>
+          <p style={S.mCat}>Restaurante</p>
+          <button style={S.mBtn(seccionActiva==="valeras")} onClick={()=>setSeccionActiva("valeras")}>Sistema de Valeras</button>
+        </>}
+
+        {tipoNegocio === "tienda" && <>
+          <p style={S.mCat}>Tienda</p>
+          <button style={S.mBtn(seccionActiva==="fiar")} onClick={()=>setSeccionActiva("fiar")}>Sistema de Fiar</button>
+        </>}
 
         <p style={S.mCat}>Ajustes</p>
         <button style={S.mBtn(seccionActiva==="perfil")} onClick={()=>setSeccionActiva("perfil")}>Perfil del Negocio</button>
-        <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>
+        {tipoNegocio === "barberia" && <button style={S.mBtn(seccionActiva==="configuracion")} onClick={()=>setSeccionActiva("configuracion")}>Horario de Atención</button>}
 
         <button onClick={cerrarSesion} style={S.logoutBtn}>Cerrar sesión</button>
       </div>
@@ -1194,6 +1443,160 @@ function App() {
                 <button type="submit" disabled={guardandoPerfil} style={S.btnPrimary()}>{guardandoPerfil?"Guardando...":"Guardar Perfil"}</button>
               </form>
             </div>
+          </div>
+        )}
+
+        {/* ─── VALERAS (RESTAURANTE) ──────────────────────────────────────── */}
+        {seccionActiva==="valeras" && (
+          <div>
+            <h1 style={S.h1}>Sistema de Valeras</h1>
+            <p style={S.sub}>Gestiona los tiquetes de almuerzos de tus clientes.</p>
+
+            {/* form nueva valera */}
+            <div style={{...S.card,maxWidth:"560px",marginBottom:"16px"}}>
+              <h2 style={{...S.h1,fontSize:"16px",marginBottom:"4px"}}>Nueva Valera</h2>
+              <p style={S.sub}>Crea una valera para un cliente con una cantidad inicial de almuerzos.</p>
+              <form onSubmit={crearValera}>
+                <div style={S.row}>
+                  <div style={{...S.field,flex:2}}><label style={S.label}>Nombre del cliente</label><input type="text" placeholder="Nombre completo" value={nuevaValera.nombre} onChange={e=>setNuevaValera({...nuevaValera,nombre:e.target.value})} style={S.input} required/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Celular</label><input type="tel" placeholder="300..." value={nuevaValera.celular} onChange={e=>setNuevaValera({...nuevaValera,celular:e.target.value})} style={S.input}/></div>
+                  <div style={{...S.field,flex:1}}><label style={S.label}>Almuerzos</label><input type="number" min="1" value={nuevaValera.cantidad} onChange={e=>setNuevaValera({...nuevaValera,cantidad:e.target.value})} style={S.input}/></div>
+                </div>
+                <button type="submit" disabled={guardandoValera} style={S.btnPrimary("#f59e0b")}>{guardandoValera?"Guardando...":"Crear Valera"}</button>
+              </form>
+            </div>
+
+            {/* lista de valeras */}
+            {valeras.length === 0
+              ? <div style={{...S.card,textAlign:"center",padding:"32px",color:"#64748b",fontSize:"14px"}}>No hay valeras registradas. Crea la primera arriba.</div>
+              : <div style={{display:"flex",flexDirection:"column",gap:"10px",maxWidth:"680px"}}>
+                {valeras.map(v => {
+                  const color = v.saldo === 0 ? "#dc2626" : v.saldo <= 3 ? "#d97706" : "#16a34a";
+                  const bg = v.saldo === 0 ? "#fee2e2" : v.saldo <= 3 ? "#fef3c7" : "#dcfce7";
+                  return (
+                    <div key={v.id} style={{...S.card,padding:"14px 16px",display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
+                      <div style={{flex:1,minWidth:"120px"}}>
+                        <div style={{fontWeight:"700",color:"#0f172a",fontSize:"15px"}}>{v.cliente_nombre}</div>
+                        {v.cliente_celular !== "N/A" && <div style={{fontSize:"12px",color:"#64748b"}}>{v.cliente_celular}</div>}
+                      </div>
+                      <div style={{backgroundColor:bg,color,borderRadius:"10px",padding:"8px 16px",fontWeight:"800",fontSize:"20px",textAlign:"center",minWidth:"70px"}}>
+                        {v.saldo}
+                        <div style={{fontSize:"10px",fontWeight:"600"}}>almuerzos</div>
+                      </div>
+                      <div style={{display:"flex",gap:"6px",alignItems:"center",flexWrap:"wrap"}}>
+                        <button onClick={()=>descontarAlmuerzo(v)} disabled={v.saldo<=0} style={{padding:"7px 14px",fontSize:"12px",fontWeight:"700",border:"none",borderRadius:"6px",cursor:v.saldo>0?"pointer":"not-allowed",backgroundColor:v.saldo>0?"#0f172a":"#f1f5f9",color:v.saldo>0?"#fff":"#cbd5e1"}}>
+                          − 1 almuerzo
+                        </button>
+                        <div style={{display:"flex",gap:"4px",alignItems:"center"}}>
+                          <input type="number" min="1" placeholder="Cant" value={recargaVal[v.id]||""} onChange={e=>setRecargaVal(prev=>({...prev,[v.id]:e.target.value}))} style={{...S.input,width:"60px",padding:"7px 8px",fontSize:"12px"}}/>
+                          <button onClick={()=>recargarValera(v)} style={{padding:"7px 10px",fontSize:"12px",fontWeight:"700",border:"1px solid #16a34a",borderRadius:"6px",cursor:"pointer",backgroundColor:"#f0fdf4",color:"#16a34a"}}>+ Recargar</button>
+                        </div>
+                        <button onClick={()=>eliminarValera(v.id)} style={{padding:"7px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#dc2626"}}>Eliminar</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            }
+          </div>
+        )}
+
+        {/* ─── FIAR (TIENDA) ──────────────────────────────────────────────── */}
+        {seccionActiva==="fiar" && (
+          <div style={{display:"flex",gap:"16px",flexWrap:"wrap",alignItems:"flex-start"}}>
+
+            {/* columna izquierda: lista de fiados */}
+            <div style={{flex:"1 1 280px",minWidth:"280px"}}>
+              <h1 style={S.h1}>Sistema de Fiar</h1>
+              <p style={S.sub}>Controla las deudas y pagos de tus clientes fiados.</p>
+
+              {/* form nuevo fiado */}
+              <div style={{...S.card,marginBottom:"14px"}}>
+                <h3 style={{...S.h1,fontSize:"15px",marginBottom:"12px"}}>Nuevo Fiado</h3>
+                <form onSubmit={crearFiado}>
+                  <div style={S.field}><label style={S.label}>Nombre</label><input type="text" placeholder="Nombre del cliente" value={nuevoFiado.nombre} onChange={e=>setNuevoFiado({...nuevoFiado,nombre:e.target.value})} style={S.input} required/></div>
+                  <div style={S.field}><label style={S.label}>Celular (opcional)</label><input type="tel" placeholder="300..." value={nuevoFiado.celular} onChange={e=>setNuevoFiado({...nuevoFiado,celular:e.target.value})} style={S.input}/></div>
+                  <button type="submit" disabled={guardandoFiado} style={S.btnPrimary()}>{guardandoFiado?"Guardando...":"Crear Fiado"}</button>
+                </form>
+              </div>
+
+              {/* lista */}
+              {fiados.length === 0
+                ? <div style={{...S.card,textAlign:"center",padding:"24px",color:"#64748b",fontSize:"13px"}}>No hay fiados registrados.</div>
+                : <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
+                  {fiados.map(f => (
+                    <div key={f.id} onClick={()=>abrirFiado(f)} style={{...S.card,padding:"12px 14px",cursor:"pointer",border:fiadoAbierto?.id===f.id?"2px solid #0f172a":"1px solid #e2e8f0",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                      <div>
+                        <div style={{fontWeight:"700",color:"#0f172a",fontSize:"14px"}}>{f.cliente_nombre}</div>
+                        {f.cliente_celular !== "N/A" && <div style={{fontSize:"11px",color:"#94a3b8"}}>{f.cliente_celular}</div>}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontWeight:"800",fontSize:"15px",color:f.deuda>0?"#dc2626":"#16a34a"}}>${Number(f.deuda||0).toLocaleString("es-CO")}</div>
+                        <div style={{fontSize:"10px",color:"#94a3b8"}}>{f.deuda>0?"debe":"al día"}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              }
+            </div>
+
+            {/* columna derecha: detalle del fiado seleccionado */}
+            {fiadoAbierto && (
+              <div style={{flex:"2 1 340px",minWidth:"300px"}}>
+                <div style={S.card}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"16px",flexWrap:"wrap",gap:"8px"}}>
+                    <div>
+                      <h2 style={{...S.h1,margin:0}}>{fiadoAbierto.cliente_nombre}</h2>
+                      <div style={{fontSize:"13px",color:"#64748b",marginTop:"2px"}}>Deuda: <strong style={{color:fiadoAbierto.deuda>0?"#dc2626":"#16a34a"}}>${Number(fiadoAbierto.deuda||0).toLocaleString("es-CO")}</strong></div>
+                    </div>
+                    <div style={{display:"flex",gap:"6px"}}>
+                      <button onClick={()=>eliminarFiado(fiadoAbierto.id)} style={{padding:"6px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",cursor:"pointer",backgroundColor:"#fff",color:"#dc2626"}}>Eliminar</button>
+                      <button onClick={()=>setFiadoAbierto(null)} style={S.btnSecondary}>Cerrar</button>
+                    </div>
+                  </div>
+
+                  {/* agregar movimiento */}
+                  <div style={{backgroundColor:"#f8fafc",borderRadius:"8px",padding:"14px",marginBottom:"16px",border:"1px solid #e2e8f0"}}>
+                    <div style={S.row}>
+                      <div style={{...S.field,flex:1,minWidth:"100px"}}>
+                        <label style={S.label}>Tipo</label>
+                        <select value={movFiado.tipo} onChange={e=>setMovFiado({...movFiado,tipo:e.target.value})} style={S.input}>
+                          <option value="cargo">Fiar (cargo)</option>
+                          <option value="pago">Pago (abono)</option>
+                        </select>
+                      </div>
+                      <div style={{...S.field,flex:2,minWidth:"140px"}}>
+                        <label style={S.label}>Concepto</label>
+                        <input type="text" placeholder={movFiado.tipo==="cargo"?"¿Qué fió?":"¿Qué pagó?"} value={movFiado.concepto} onChange={e=>setMovFiado({...movFiado,concepto:e.target.value})} style={S.input}/>
+                      </div>
+                      <div style={{...S.field,flex:1,minWidth:"90px"}}>
+                        <label style={S.label}>Valor ($)</label>
+                        <input type="number" min="1" placeholder="0" value={movFiado.monto} onChange={e=>setMovFiado({...movFiado,monto:e.target.value})} style={S.input}/>
+                      </div>
+                    </div>
+                    <button onClick={agregarMovFiado} disabled={guardandoMovFiado||!movFiado.monto} style={{...S.btnPrimary(movFiado.tipo==="cargo"?"#dc2626":"#16a34a"),marginTop:0,opacity:!movFiado.monto?0.5:1}}>
+                      {guardandoMovFiado?"Guardando...":(movFiado.tipo==="cargo"?"Registrar Fiado":"Registrar Pago")}
+                    </button>
+                  </div>
+
+                  {/* historial de movimientos */}
+                  <p style={{...S.secLabel,marginTop:0}}>Historial</p>
+                  {cargandoMovs && <p style={{color:"#64748b",fontSize:"13px",textAlign:"center"}}>Cargando...</p>}
+                  {!cargandoMovs && movimientos.length === 0 && <p style={{color:"#94a3b8",fontSize:"13px",textAlign:"center",padding:"16px"}}>Sin movimientos aún.</p>}
+                  {movimientos.map(m => (
+                    <div key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:"1px solid #f1f5f9",fontSize:"13px"}}>
+                      <div>
+                        <span style={{...S.tag(m.tipo==="cargo"?"#fee2e2":"#dcfce7",m.tipo==="cargo"?"#dc2626":"#16a34a"),marginRight:"8px"}}>{m.tipo==="cargo"?"Fiado":"Pago"}</span>
+                        {m.concepto}
+                      </div>
+                      <div style={{fontWeight:"700",color:m.tipo==="cargo"?"#dc2626":"#16a34a",flexShrink:0,marginLeft:"8px"}}>
+                        {m.tipo==="cargo"?"+":"-"}${Number(m.monto).toLocaleString("es-CO")}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
