@@ -2116,11 +2116,25 @@ function App() {
                   <div style={{...S.field,flex:1}}><label style={S.label}>Apertura</label><input type="time" value={configAgenda.hora_inicio} onChange={e=>setConfigAgenda({...configAgenda,hora_inicio:e.target.value})} style={S.input}/></div>
                   <div style={{...S.field,flex:1}}><label style={S.label}>Cierre</label><input type="time" value={configAgenda.hora_fin} onChange={e=>setConfigAgenda({...configAgenda,hora_fin:e.target.value})} style={S.input}/></div>
                 </div>
-                <div style={S.secLabel}>Días de Atención</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:"8px",marginBottom:"20px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"10px"}}>
+                  <span style={S.secLabel}>Días de Atención</span>
+                  <div style={{display:"flex",gap:"6px"}}>
+                    <button type="button" onClick={()=>setConfigAgenda({...configAgenda,dias_activos:["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"]})} style={{fontSize:"11px",fontWeight:"600",padding:"4px 10px",border:`1px solid ${T.border}`,borderRadius:"6px",backgroundColor:T.surface,color:T.textSub,cursor:"pointer"}}>Todos</button>
+                    <button type="button" onClick={()=>setConfigAgenda({...configAgenda,dias_activos:[]})} style={{fontSize:"11px",fontWeight:"600",padding:"4px 10px",border:`1px solid ${T.border}`,borderRadius:"6px",backgroundColor:T.surface,color:T.textSub,cursor:"pointer"}}>Ninguno</button>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"8px",marginBottom:"20px"}}>
                   {["Lunes","Martes","Miércoles","Jueves","Viernes","Sábado","Domingo"].map(dia=>{
                     const activo=(configAgenda.dias_activos||[]).includes(dia);
-                    return <button key={dia} type="button" onClick={()=>toggleDia(dia)} style={{padding:"8px 14px",borderRadius:"6px",border:`1px solid ${activo?"#0f172a":"#cbd5e1"}`,backgroundColor:activo?"#0f172a":"#fff",color:activo?"#fff":"#64748b",fontSize:"13px",fontWeight:"600",cursor:"pointer"}}>{dia}</button>;
+                    return (
+                      <label key={dia} style={{display:"flex",alignItems:"center",gap:"10px",padding:"11px 13px",borderRadius:"8px",border:`2px solid ${activo?"#16a34a":T.border}`,backgroundColor:activo?(darkMode?"rgba(22,163,74,0.15)":"#f0fdf4"):T.surface,cursor:"pointer",userSelect:"none",transition:"border-color 0.15s,background-color 0.15s"}}>
+                        <input type="checkbox" checked={activo} onChange={()=>toggleDia(dia)} style={{display:"none"}}/>
+                        <div style={{width:"20px",height:"20px",borderRadius:"5px",flexShrink:0,border:`2px solid ${activo?"#16a34a":T.inputBorder}`,backgroundColor:activo?"#16a34a":T.inputBg,display:"flex",alignItems:"center",justifyContent:"center",transition:"background-color 0.15s,border-color 0.15s"}}>
+                          {activo&&<span style={{color:"#fff",fontSize:"12px",fontWeight:"900",lineHeight:1}}>✓</span>}
+                        </div>
+                        <span style={{fontSize:"14px",fontWeight:activo?"700":"500",color:activo?(darkMode?"#86efac":"#15803d"):T.textSub}}>{dia}</span>
+                      </label>
+                    );
                   })}
                 </div>
                 <button type="submit" disabled={guardandoConfig} style={S.btnPrimary()}>{guardandoConfig?"Guardando...":"Guardar Horario"}</button>
