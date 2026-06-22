@@ -71,9 +71,17 @@ function App() {
   const [metricasMes, setMetricasMes] = useState({ total_ventas: 0, cantidad_transacciones: 0 });
 
   // dashboard analytics
+  const [dashPeriodo, setDashPeriodo] = useState("mes"); // "dia" | "semana" | "mes"
   const [dashMes, setDashMes] = useState(() => { const d=new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; });
+  const [dashFecha, setDashFecha] = useState(hoy);
   const [facturasDash, setFacturasDash] = useState([]);
   const [cargandoDash, setCargandoDash] = useState(false);
+
+  // cobro rápido desde agenda
+  const [citaACobrar, setCitaACobrar] = useState(null);
+  const [cobrarMetodo, setCobrarMetodo] = useState("Efectivo");
+  const [cobrarMonto, setCobrarMonto] = useState("");
+  const [cobrandoCita, setCobrandoCita] = useState(false);
 
   // historial
   const [facturas, setFacturas] = useState([]);
@@ -301,14 +309,27 @@ function App() {
   }, [usuario, fechaAgenda, seccionActiva]);
 
   // ── dashboard analytics ──────────────────────────────────────────────────
-  const cargarDashboard = async (mes, uid) => {
-    const u = uid || (usuario?.uid);
+  const cargarDashboard = async (periodo, fecha, mes, uid) => {
+    const u = uid || usuario?.uid;
     if (!u) return;
     setCargandoDash(true);
     try {
-      const [y, m] = mes.split("-").map(Number);
-      const inicio = new Date(y, m-1, 1);
-      const fin    = new Date(y, m,   1);
+      let inicio, fin;
+      if (periodo === "dia") {
+        const [y,m,d] = fecha.split("-").map(Number);
+        inicio = new Date(y, m-1, d);
+        fin    = new Date(y, m-1, d+1);
+      } else if (periodo === "semana") {
+        const [y,m,d] = fecha.split("-").map(Number);
+        const base = new Date(y, m-1, d);
+        const diff = base.getDay()===0 ? -6 : 1-base.getDay();
+        inicio = new Date(base); inicio.setDate(inicio.getDate()+diff);
+        fin    = new Date(inicio); fin.setDate(fin.getDate()+7);
+      } else {
+        const [y,m] = mes.split("-").map(Number);
+        inicio = new Date(y, m-1, 1);
+        fin    = new Date(y, m,   1);
+      }
       const snap = await getDocs(query(
         collection(db, `negocios/${u}/facturas`),
         where("fecha_creacion",">=", inicio),
@@ -319,13 +340,13 @@ function App() {
     } catch(e){ console.error(e); } finally { setCargandoDash(false); }
   };
 
-  // cargar dashboard al entrar a la sección o cambiar el mes
+  // cargar dashboard al entrar a la sección o cambiar filtros
   useEffect(() => {
     if (seccionActiva === "dashboard" && usuario && !esAdmin) {
-      cargarDashboard(dashMes);
+      cargarDashboard(dashPeriodo, dashFecha, dashMes);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seccionActiva, dashMes, usuario]);
+  }, [seccionActiva, dashPeriodo, dashFecha, dashMes, usuario]);
 
   // ── historial ────────────────────────────────────────────────────────────
   const cargarPrimerasFacturas = async (uid) => {
@@ -626,6 +647,32 @@ function App() {
       await setDoc(doc(db,`negocios/${usuario.uid}/citas`,citaId),{ estado:"cancelada" },{ merge:true });
       setCitasDelDia(prev=>prev.map(c=>c.id===citaId?{...c,estado:"cancelada"}:c));
     } catch { alert("Error al cancelar."); }
+  };
+
+  const cobrarCita = async () => {
+    if (!usuario || !citaACobrar || !cobrarMonto) return;
+    setCobrandoCita(true);
+    try {
+      const monto = Number(cobrarMonto);
+      const facturaData = {
+        tipo_documento:"Recibo Interno",
+        cliente:{ nombre:citaACobrar.cliente_nombre, identificacion:"", correo:"", celular:citaACobrar.cliente_celular||"" },
+        venta:{ concepto:citaACobrar.servicio_nombre, monto_total:monto, base_gravable:monto, valor_iva:0, porcentaje_iva:0, metodo_pago:cobrarMetodo },
+        profesional_id:citaACobrar.profesional_id||"",
+        profesional_nombre:citaACobrar.profesional_nombre||"",
+        desde_agenda:true, estado_dian:"No aplica", fecha_creacion:new Date()
+      };
+      const batch = writeBatch(db);
+      const ref = doc(collection(db,`negocios/${usuario.uid}/facturas`));
+      batch.set(ref, facturaData);
+      batch.set(doc(db,`negocios/${usuario.uid}/metricas`,periodoActual()),{ total_ventas:increment(monto), cantidad_transacciones:increment(1), ultima_actualizacion:new Date() },{ merge:true });
+      batch.set(doc(db,`negocios/${usuario.uid}/citas`,citaACobrar.id),{ estado:"cobrada" },{ merge:true });
+      await batch.commit();
+      setCitasDelDia(prev=>prev.map(c=>c.id===citaACobrar.id?{...c,estado:"cobrada"}:c));
+      setCitaACobrar(null); setCobrarMonto(""); setCobrarMetodo("Efectivo");
+      alert("Cobro registrado.");
+    } catch(e){ console.error(e); alert("Error al registrar el cobro."); }
+    finally { setCobrandoCita(false); }
   };
 
   // ── confirmar cita pública ────────────────────────────────────────────────
@@ -1158,6 +1205,12 @@ function App() {
           const cliList = Object.entries(porCli).sort((a,b)=>b[1].t-a[1].t).slice(0,6);
           const maxCli  = cliList[0]?.[1].t||1;
 
+          // por profesional (solo facturas desde agenda)
+          const porProf = {};
+          facturasDash.forEach(f=>{ const n=(f.profesional_nombre||"").trim(); if(!n||n==="Sin asignar") return; if(!porProf[n]) porProf[n]={n:0,t:0}; porProf[n].n++; porProf[n].t+=Number(f.venta?.monto_total||0); });
+          const profList = Object.entries(porProf).sort((a,b)=>b[1].t-a[1].t);
+          const maxProf  = profList[0]?.[1].t||1;
+
           // por día de semana
           const DIAS=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
           const porDia=Array(7).fill(0);
@@ -1197,18 +1250,30 @@ function App() {
 
           return (
             <div>
-              {/* encabezado + selector de mes */}
-              <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:"12px",marginBottom:"20px"}}>
-                <div>
-                  <h1 style={{...S.h1,marginBottom:"4px"}}>Analytics</h1>
-                  <p style={{...S.sub,margin:0}}>Inteligencia de negocio por periodo.</p>
+              {/* encabezado */}
+              <div style={{marginBottom:"16px"}}>
+                <h1 style={{...S.h1,marginBottom:"2px"}}>Datos de Ventas</h1>
+                <p style={{...S.sub,margin:0}}>Resumen de facturación y comportamiento del negocio.</p>
+              </div>
+
+              {/* filtros de periodo */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:"10px",alignItems:"center",marginBottom:"20px"}}>
+                <div style={{display:"flex",backgroundColor:T.border,borderRadius:"8px",padding:"3px",gap:"2px"}}>
+                  {[["Día","dia"],["Semana","semana"],["Mes","mes"]].map(([l,v])=>(
+                    <button key={v} onClick={()=>setDashPeriodo(v)} style={{padding:"6px 14px",borderRadius:"6px",border:"none",fontWeight:"700",fontSize:"12px",cursor:"pointer",backgroundColor:dashPeriodo===v?"#0f172a":"transparent",color:dashPeriodo===v?"#fff":T.textSub}}>
+                      {l}
+                    </button>
+                  ))}
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                  <select value={dashMes} onChange={e=>setDashMes(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"8px 12px"}}>
+                {dashPeriodo==="mes" && (
+                  <select value={dashMes} onChange={e=>setDashMes(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}>
                     {mesesOpc.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
                   </select>
-                  {cargandoDash && <span style={{fontSize:"12px",color:T.textSub}}>Cargando...</span>}
-                </div>
+                )}
+                {(dashPeriodo==="dia"||dashPeriodo==="semana") && (
+                  <input type="date" value={dashFecha} onChange={e=>setDashFecha(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}/>
+                )}
+                {cargandoDash && <span style={{fontSize:"12px",color:T.textSub}}>Cargando...</span>}
               </div>
 
               {count===0 && !cargandoDash && (
@@ -1290,6 +1355,25 @@ function App() {
                             </div>
                           </div>
                           <Barra pct={d.t/maxCli*100} color="#7c3aed" h={7}/>
+                        </div>
+                      ))}
+                    </Panel>
+                  )}
+
+                  {/* Por profesional */}
+                  {profList.length>0 && (
+                    <Panel>
+                      <SecTitle>Por Barbero / Profesional</SecTitle>
+                      {profList.map(([n,d])=>(
+                        <div key={n} style={{marginBottom:"12px"}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
+                            <span style={{fontSize:"13px",fontWeight:"600",color:T.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</span>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
+                              <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} cobro{d.n!==1?"s":""}</span>
+                            </div>
+                          </div>
+                          <Barra pct={d.t/maxProf*100} color="#0891b2" h={8}/>
                         </div>
                       ))}
                     </Panel>
@@ -1534,22 +1618,52 @@ function App() {
                 ) : (
                   <div style={{display:"flex",flexDirection:"column",gap:"8px"}}>
                     {citasConfirmadas.map(c=>(
-                      <div key={c.id} style={{...S.card,padding:"14px 16px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
-                        <div style={{backgroundColor:"#0f172a",color:"#fff",borderRadius:"8px",padding:"8px 12px",fontWeight:"800",fontSize:"13px",minWidth:"70px",textAlign:"center",flexShrink:0}}>
-                          {hora12(c.hora_inicio)}
-                        </div>
-                        <div style={{flex:1,minWidth:"120px"}}>
-                          <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>{c.cliente_nombre}</div>
-                          <div style={{fontSize:"12px",color:T.textSub,marginTop:"2px"}}>
-                            {c.servicio_nombre} · {c.servicio_duracion} min
-                            {c.profesional_nombre&&c.profesional_nombre!=="Sin asignar"&&<> · <strong>{c.profesional_nombre}</strong></>}
+                      <div key={c.id} style={{...S.card,padding:"14px 16px"}}>
+                        {/* fila principal */}
+                        <div style={{display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}}>
+                          <div style={{backgroundColor:"#0f172a",color:"#fff",borderRadius:"8px",padding:"8px 12px",fontWeight:"800",fontSize:"13px",minWidth:"70px",textAlign:"center",flexShrink:0}}>
+                            {hora12(c.hora_inicio)}
                           </div>
-                          {c.cliente_celular&&c.cliente_celular!=="N/A"&&<div style={{fontSize:"11px",color:"#94a3b8"}}>{c.cliente_celular}</div>}
+                          <div style={{flex:1,minWidth:"120px"}}>
+                            <div style={{fontWeight:"700",color:T.text,fontSize:"14px"}}>{c.cliente_nombre}</div>
+                            <div style={{fontSize:"12px",color:T.textSub,marginTop:"2px"}}>
+                              {c.servicio_nombre} · {c.servicio_duracion} min
+                              {c.profesional_nombre&&c.profesional_nombre!=="Sin asignar"&&<> · <strong>{c.profesional_nombre}</strong></>}
+                            </div>
+                            {c.cliente_celular&&c.cliente_celular!=="N/A"&&<div style={{fontSize:"11px",color:"#94a3b8"}}>{c.cliente_celular}</div>}
+                          </div>
+                          <div style={{display:"flex",gap:"6px",flexShrink:0,flexWrap:"wrap"}}>
+                            <span style={S.tag(c.origen==="online"?"#e0f2fe":"#f0fdf4",c.origen==="online"?"#0369a1":"#166534")}>{c.origen==="online"?"Online":"Manual"}</span>
+                            {c.estado==="cobrada"
+                              ? <span style={S.tag("#f0fdf4","#16a34a")}>Cobrada</span>
+                              : <>
+                                  <button onClick={()=>{ const sv=servicios.find(s=>s.nombre===c.servicio_nombre); setCitaACobrar(citaACobrar?.id===c.id?null:c); setCobrarMonto(sv?String(sv.precio):""); setCobrarMetodo("Efectivo"); }} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"700",border:"1px solid #bbf7d0",borderRadius:"6px",backgroundColor:"#f0fdf4",color:"#16a34a",cursor:"pointer"}}>Cobrar</button>
+                                  <button onClick={()=>cancelarCita(c.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:T.surface,color:"#dc2626",cursor:"pointer"}}>Cancelar</button>
+                                </>
+                            }
+                          </div>
                         </div>
-                        <div style={{display:"flex",gap:"6px",flexShrink:0}}>
-                          <span style={S.tag(c.origen==="online"?"#e0f2fe":"#f0fdf4", c.origen==="online"?"#0369a1":"#166534")}>{c.origen==="online"?"Online":"Manual"}</span>
-                          <button onClick={()=>cancelarCita(c.id)} style={{padding:"5px 10px",fontSize:"11px",fontWeight:"600",border:"1px solid #fecaca",borderRadius:"6px",backgroundColor:"#fff",color:"#dc2626",cursor:"pointer"}}>Cancelar</button>
-                        </div>
+
+                        {/* panel cobro inline */}
+                        {citaACobrar?.id===c.id && (
+                          <div style={{marginTop:"12px",padding:"14px",backgroundColor:T.surfaceAlt,borderRadius:"10px",border:`1px solid ${T.border}`}}>
+                            <p style={{fontSize:"13px",fontWeight:"700",color:T.text,margin:"0 0 10px"}}>Cobrar a {c.cliente_nombre}</p>
+                            <div style={{display:"flex",gap:"10px",flexWrap:"wrap",alignItems:"flex-end"}}>
+                              <div style={{...S.field,margin:0,flex:"1 1 120px"}}>
+                                <label style={{...S.label,marginBottom:"4px"}}>Valor ($)</label>
+                                <input type="number" min="0" value={cobrarMonto} onChange={e=>setCobrarMonto(e.target.value)} style={{...S.input,margin:0}} placeholder="0"/>
+                              </div>
+                              <div style={{...S.field,margin:0,flex:"1 1 140px"}}>
+                                <label style={{...S.label,marginBottom:"4px"}}>Método de Pago</label>
+                                <select value={cobrarMetodo} onChange={e=>setCobrarMetodo(e.target.value)} style={{...S.input,margin:0}}>
+                                  <option>Efectivo</option><option>Nequi</option><option>Daviplata</option><option value="Bancolombia">Transferencia</option><option>Tarjeta</option>
+                                </select>
+                              </div>
+                              <button onClick={cobrarCita} disabled={cobrandoCita||!cobrarMonto} style={{...S.btnPrimary("#16a34a"),margin:0,padding:"9px 18px",flexShrink:0}}>{cobrandoCita?"Registrando...":"Confirmar cobro"}</button>
+                              <button onClick={()=>setCitaACobrar(null)} style={{...S.btnSecondary,margin:0,padding:"9px 14px",flexShrink:0}}>✕</button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
