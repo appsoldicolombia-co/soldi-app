@@ -76,6 +76,8 @@ function App() {
   const [dashFecha, setDashFecha] = useState(hoy);
   const [facturasDash, setFacturasDash] = useState([]);
   const [cargandoDash, setCargandoDash] = useState(false);
+  const [dashPaneles, setDashPaneles] = useState(()=>new Set(["metodo","profesional"]));
+  const togglePanel = k => setDashPaneles(prev=>{ const s=new Set(prev); s.has(k)?s.delete(k):s.add(k); return s; });
 
   // cobro rápido desde agenda
   const [citaACobrar, setCitaACobrar] = useState(null);
@@ -1180,45 +1182,39 @@ function App() {
 
         {/* ─── DASHBOARD ─────────────────────────────────────────────────── */}
         {seccionActiva==="dashboard" && (() => {
-          // ── analytics ────────────────────────────────────────────────────
+          // ── cálculos ─────────────────────────────────────────────────────
           const fmtCOP = n => `$${Number(n).toLocaleString("es-CO")}`;
           const total  = facturasDash.reduce((s,f)=>s+Number(f.venta?.monto_total||0),0);
           const count  = facturasDash.length;
           const avg    = count>0 ? total/count : 0;
 
-          // canales de pago
           const coloresMetodo = { Efectivo:"#16a34a", Nequi:"#7c3aed", Daviplata:"#0ea5e9", Bancolombia:"#d97706", Tarjeta:"#dc2626" };
           const porMetodo = {};
           facturasDash.forEach(f=>{ const m=f.venta?.metodo_pago||"Otro"; porMetodo[m]=(porMetodo[m]||0)+Number(f.venta?.monto_total||0); });
           const metodoList = Object.entries(porMetodo).sort((a,b)=>b[1]-a[1]);
           const maxMetodo  = metodoList[0]?.[1]||1;
 
-          // top productos
           const porProd = {};
           facturasDash.forEach(f=>{ const c=f.venta?.concepto||"Sin concepto"; if(!porProd[c]) porProd[c]={n:0,t:0}; porProd[c].n++; porProd[c].t+=Number(f.venta?.monto_total||0); });
-          const prodList = Object.entries(porProd).sort((a,b)=>b[1].t-a[1].t).slice(0,7);
+          const prodList = Object.entries(porProd).sort((a,b)=>b[1].t-a[1].t).slice(0,8);
           const maxProd  = prodList[0]?.[1].t||1;
 
-          // top clientes (excluye anónimos)
           const porCli = {};
           facturasDash.forEach(f=>{ const n=(f.cliente?.nombre||"").trim(); if(!n||n==="Cuantías Menores"||n==="Sin nombre") return; if(!porCli[n]) porCli[n]={n:0,t:0}; porCli[n].n++; porCli[n].t+=Number(f.venta?.monto_total||0); });
           const cliList = Object.entries(porCli).sort((a,b)=>b[1].t-a[1].t).slice(0,6);
           const maxCli  = cliList[0]?.[1].t||1;
 
-          // por profesional (solo facturas desde agenda)
           const porProf = {};
           facturasDash.forEach(f=>{ const n=(f.profesional_nombre||"").trim(); if(!n||n==="Sin asignar") return; if(!porProf[n]) porProf[n]={n:0,t:0}; porProf[n].n++; porProf[n].t+=Number(f.venta?.monto_total||0); });
           const profList = Object.entries(porProf).sort((a,b)=>b[1].t-a[1].t);
           const maxProf  = profList[0]?.[1].t||1;
 
-          // por día de semana
           const DIAS=["Dom","Lun","Mar","Mié","Jue","Vie","Sáb"];
           const porDia=Array(7).fill(0);
           facturasDash.forEach(f=>{ const ts=f.fecha_creacion?.seconds?new Date(f.fecha_creacion.seconds*1000):null; if(ts) porDia[ts.getDay()]++; });
           const maxDia=Math.max(...porDia,1);
           const mejorDia=porDia.some(v=>v>0)?DIAS[porDia.indexOf(Math.max(...porDia))]:"—";
 
-          // por hora
           const porHora=Array(24).fill(0);
           facturasDash.forEach(f=>{ const ts=f.fecha_creacion?.seconds?new Date(f.fecha_creacion.seconds*1000):null; if(ts) porHora[ts.getHours()]++; });
           const horasActivas=porHora.map((v,h)=>({h,v})).filter(x=>x.v>0);
@@ -1226,38 +1222,46 @@ function App() {
           const mejorHora=horasActivas.length>0?horasActivas.reduce((a,b)=>b.v>a.v?b:a):null;
           const fmtHora=h=>h===0?"12am":h<12?`${h}am`:h===12?"12pm":`${h-12}pm`;
 
-          // meses disponibles para el selector (últimos 24 meses)
           const mesesOpc=[];
           const ahora=new Date();
           for(let i=0;i<24;i++){
             const d=new Date(ahora.getFullYear(),ahora.getMonth()-i,1);
-            const v=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
-            const l=d.toLocaleDateString("es-CO",{month:"long",year:"numeric"});
-            mesesOpc.push({v,l});
+            mesesOpc.push({v:`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`,l:d.toLocaleDateString("es-CO",{month:"long",year:"numeric"})});
           }
 
+          // ── componentes locales ───────────────────────────────────────────
           const Barra=({pct,color="#2563eb",h=8})=>(
             <div style={{flex:1,height:`${h}px`,backgroundColor:T.border,borderRadius:"99px",overflow:"hidden"}}>
               <div style={{width:`${Math.max(pct,2)}%`,height:"100%",backgroundColor:color,borderRadius:"99px",transition:"width 0.5s ease"}}/>
             </div>
           );
-          const SecTitle=({children})=>(
-            <h3 style={{fontSize:"13px",fontWeight:"700",color:T.textSub,textTransform:"uppercase",letterSpacing:"0.06em",margin:"0 0 14px"}}>{children}</h3>
-          );
-          const Panel=({children,style})=>(
-            <div style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"20px",...style}}>{children}</div>
-          );
+
+          const Acordeon=({id,titulo,resumen,children})=>{
+            const open=dashPaneles.has(id);
+            return (
+              <div style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",overflow:"hidden",marginBottom:"10px"}}>
+                <button onClick={()=>togglePanel(id)} style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 18px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:"12px"}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <span style={{fontSize:"13px",fontWeight:"700",color:T.text,display:"block"}}>{titulo}</span>
+                    {!open&&resumen&&<span style={{fontSize:"11px",color:T.textSub,marginTop:"1px",display:"block"}}>{resumen}</span>}
+                  </div>
+                  <span style={{fontSize:"13px",color:T.textSub,flexShrink:0,transition:"transform 0.2s",transform:open?"rotate(180deg)":"none"}}>▼</span>
+                </button>
+                {open&&<div style={{padding:"0 18px 18px"}}>{children}</div>}
+              </div>
+            );
+          };
 
           return (
             <div>
               {/* encabezado */}
-              <div style={{marginBottom:"16px"}}>
+              <div style={{marginBottom:"14px"}}>
                 <h1 style={{...S.h1,marginBottom:"2px"}}>Datos de Ventas</h1>
-                <p style={{...S.sub,margin:0}}>Resumen de facturación y comportamiento del negocio.</p>
+                <p style={{...S.sub,margin:0}}>Facturación y comportamiento del negocio.</p>
               </div>
 
-              {/* filtros de periodo */}
-              <div style={{display:"flex",flexWrap:"wrap",gap:"10px",alignItems:"center",marginBottom:"20px"}}>
+              {/* filtros */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:"8px",alignItems:"center",marginBottom:"18px"}}>
                 <div style={{display:"flex",backgroundColor:T.border,borderRadius:"8px",padding:"3px",gap:"2px"}}>
                   {[["Día","dia"],["Semana","semana"],["Mes","mes"]].map(([l,v])=>(
                     <button key={v} onClick={()=>setDashPeriodo(v)} style={{padding:"6px 14px",borderRadius:"6px",border:"none",fontWeight:"700",fontSize:"12px",cursor:"pointer",backgroundColor:dashPeriodo===v?"#0f172a":"transparent",color:dashPeriodo===v?"#fff":T.textSub}}>
@@ -1265,145 +1269,124 @@ function App() {
                     </button>
                   ))}
                 </div>
-                {dashPeriodo==="mes" && (
-                  <select value={dashMes} onChange={e=>setDashMes(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}>
-                    {mesesOpc.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
-                  </select>
-                )}
-                {(dashPeriodo==="dia"||dashPeriodo==="semana") && (
-                  <input type="date" value={dashFecha} onChange={e=>setDashFecha(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}/>
-                )}
-                {cargandoDash && <span style={{fontSize:"12px",color:T.textSub}}>Cargando...</span>}
+                {dashPeriodo==="mes"
+                  ? <select value={dashMes} onChange={e=>setDashMes(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}>{mesesOpc.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}</select>
+                  : <input type="date" value={dashFecha} onChange={e=>setDashFecha(e.target.value)} style={{...S.input,width:"auto",fontWeight:"600",fontSize:"13px",padding:"7px 12px"}}/>
+                }
+                {cargandoDash&&<span style={{fontSize:"12px",color:T.textSub}}>Cargando...</span>}
               </div>
 
-              {count===0 && !cargandoDash && (
-                <Panel><p style={{color:T.textSub,fontSize:"13px",textAlign:"center",padding:"20px 0",margin:0}}>No hay ventas registradas en este periodo.</p></Panel>
+              {count===0&&!cargandoDash&&(
+                <div style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"32px",textAlign:"center"}}>
+                  <p style={{color:T.textSub,fontSize:"13px",margin:0}}>No hay ventas registradas en este periodo.</p>
+                </div>
               )}
 
-              {count>0 && <>
-                {/* ── KPIs ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:"12px",marginBottom:"20px"}}>
+              {count>0&&<>
+                {/* KPIs siempre visibles */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:"10px",marginBottom:"16px"}}>
                   {[
-                    {l:"Total facturado",v:fmtCOP(total),c:"#2563eb"},
-                    {l:"Transacciones",v:count,c:"#0891b2"},
-                    {l:"Ticket promedio",v:fmtCOP(Math.round(avg)),c:"#7c3aed"},
-                    {l:"Día más activo",v:mejorDia,c:"#16a34a"},
+                    {l:"Total",v:fmtCOP(total),c:"#2563eb"},
+                    {l:"Ventas",v:count,c:"#0891b2"},
+                    {l:"Promedio",v:fmtCOP(Math.round(avg)),c:"#7c3aed"},
+                    {l:"Mejor día",v:mejorDia,c:"#16a34a"},
                     ...(mejorHora?[{l:"Hora pico",v:fmtHora(mejorHora.h),c:"#d97706"}]:[]),
                   ].map(k=>(
-                    <div key={k.l} style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"16px"}}>
-                      <p style={{fontSize:"11px",fontWeight:"600",color:T.textSub,margin:"0 0 6px",textTransform:"uppercase",letterSpacing:"0.05em"}}>{k.l}</p>
-                      <p style={{fontSize:"22px",fontWeight:"800",color:k.c,margin:0}}>{k.v}</p>
+                    <div key={k.l} style={{backgroundColor:T.surface,border:`1px solid ${T.border}`,borderRadius:"12px",padding:"14px 16px"}}>
+                      <p style={{fontSize:"10px",fontWeight:"700",color:T.textSub,margin:"0 0 4px",textTransform:"uppercase",letterSpacing:"0.06em"}}>{k.l}</p>
+                      <p style={{fontSize:"20px",fontWeight:"800",color:k.c,margin:0,lineHeight:1}}>{k.v}</p>
                     </div>
                   ))}
                 </div>
 
-                {/* ── fila principal ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"16px",marginBottom:"16px"}}>
-
-                  {/* Canales de pago */}
-                  <Panel>
-                    <SecTitle>Canales de Pago</SecTitle>
-                    {metodoList.map(([m,t])=>(
-                      <div key={m} style={{marginBottom:"14px"}}>
-                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
-                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text}}>{m}</span>
-                          <div style={{textAlign:"right"}}>
-                            <span style={{fontSize:"13px",fontWeight:"700",color:T.text}}>{fmtCOP(t)}</span>
-                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"6px"}}>{Math.round(t/total*100)}%</span>
-                          </div>
+                {/* acordeones */}
+                <Acordeon id="metodo" titulo="Canales de Pago" resumen={metodoList.map(([m,t])=>`${m} ${Math.round(t/total*100)}%`).join(" · ")}>
+                  {metodoList.map(([m,t])=>(
+                    <div key={m} style={{marginBottom:"13px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px"}}>
+                        <span style={{fontSize:"13px",fontWeight:"600",color:T.text}}>{m}</span>
+                        <div>
+                          <span style={{fontSize:"13px",fontWeight:"700",color:T.text}}>{fmtCOP(t)}</span>
+                          <span style={{fontSize:"11px",color:T.textSub,marginLeft:"6px"}}>{Math.round(t/total*100)}%</span>
                         </div>
-                        <Barra pct={t/maxMetodo*100} color={coloresMetodo[m]||"#64748b"} h={10}/>
                       </div>
-                    ))}
-                  </Panel>
+                      <Barra pct={t/maxMetodo*100} color={coloresMetodo[m]||"#64748b"} h={10}/>
+                    </div>
+                  ))}
+                </Acordeon>
 
-                  {/* Top productos */}
-                  <Panel>
-                    <SecTitle>Top {tipoNegocio==="barberia"?"Servicios":"Productos"}</SecTitle>
-                    {prodList.map(([c,d],i)=>(
-                      <div key={c} style={{marginBottom:"12px"}}>
+                {profList.length>0&&(
+                  <Acordeon id="profesional" titulo={tipoNegocio==="barberia"?"Por Barbero":"Por Profesional"} resumen={profList.map(([n,d])=>`${n} ${fmtCOP(d.t)}`).join(" · ")}>
+                    {profList.map(([n,d])=>(
+                      <div key={n} style={{marginBottom:"12px"}}>
                         <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
-                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{i+1}. {c}</span>
+                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</span>
                           <div style={{textAlign:"right",flexShrink:0}}>
                             <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
-                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n}x</span>
+                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} cobro{d.n!==1?"s":""}</span>
                           </div>
                         </div>
-                        <Barra pct={d.t/maxProd*100} color="#2563eb" h={7}/>
+                        <Barra pct={d.t/maxProf*100} color="#0891b2" h={8}/>
                       </div>
                     ))}
-                  </Panel>
-                </div>
+                  </Acordeon>
+                )}
 
-                {/* ── fila secundaria ── */}
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:"16px",marginBottom:"16px"}}>
-
-                  {/* Top clientes */}
-                  {cliList.length>0 && (
-                    <Panel>
-                      <SecTitle>Top Clientes</SecTitle>
-                      {cliList.map(([n,d],i)=>(
-                        <div key={n} style={{marginBottom:"12px"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
-                            <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
-                              <span style={{display:"inline-block",width:"18px",height:"18px",backgroundColor:["#fbbf24","#94a3b8","#cd7c3f","#64748b","#64748b"][i]||T.border,borderRadius:"50%",textAlign:"center",lineHeight:"18px",fontSize:"10px",fontWeight:"800",color:"#fff",marginRight:"6px"}}>{i+1}</span>
-                              {n}
-                            </span>
-                            <div style={{textAlign:"right",flexShrink:0}}>
-                              <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
-                              <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} visita{d.n!==1?"s":""}</span>
-                            </div>
-                          </div>
-                          <Barra pct={d.t/maxCli*100} color="#7c3aed" h={7}/>
+                <Acordeon id="productos" titulo={tipoNegocio==="barberia"?"Top Servicios":"Top Productos"} resumen={prodList[0]?`${prodList[0][0]} lidera con ${fmtCOP(prodList[0][1].t)}`:"Sin datos"}>
+                  {prodList.map(([c,d],i)=>(
+                    <div key={c} style={{marginBottom:"11px"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
+                        <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>{i+1}. {c}</span>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
+                          <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n}x</span>
                         </div>
-                      ))}
-                    </Panel>
-                  )}
+                      </div>
+                      <Barra pct={d.t/maxProd*100} color="#2563eb" h={7}/>
+                    </div>
+                  ))}
+                </Acordeon>
 
-                  {/* Por profesional */}
-                  {profList.length>0 && (
-                    <Panel>
-                      <SecTitle>Por Barbero / Profesional</SecTitle>
-                      {profList.map(([n,d])=>(
-                        <div key={n} style={{marginBottom:"12px"}}>
-                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
-                            <span style={{fontSize:"13px",fontWeight:"600",color:T.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n}</span>
-                            <div style={{textAlign:"right",flexShrink:0}}>
-                              <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
-                              <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} cobro{d.n!==1?"s":""}</span>
-                            </div>
+                {cliList.length>0&&(
+                  <Acordeon id="clientes" titulo="Top Clientes" resumen={`${cliList.length} cliente${cliList.length!==1?"s":""} identificados · mejor: ${cliList[0]?.[0]}`}>
+                    {cliList.map(([n,d],i)=>(
+                      <div key={n} style={{marginBottom:"11px"}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"4px",gap:"8px"}}>
+                          <span style={{fontSize:"13px",fontWeight:"600",color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+                            <span style={{display:"inline-block",width:"17px",height:"17px",backgroundColor:["#fbbf24","#94a3b8","#cd7c3f","#64748b","#64748b"][i]||T.border,borderRadius:"50%",textAlign:"center",lineHeight:"17px",fontSize:"9px",fontWeight:"800",color:"#fff",marginRight:"5px"}}>{i+1}</span>
+                            {n}
+                          </span>
+                          <div style={{textAlign:"right",flexShrink:0}}>
+                            <span style={{fontSize:"12px",fontWeight:"700",color:T.text}}>{fmtCOP(d.t)}</span>
+                            <span style={{fontSize:"11px",color:T.textSub,marginLeft:"5px"}}>{d.n} visita{d.n!==1?"s":""}</span>
                           </div>
-                          <Barra pct={d.t/maxProf*100} color="#0891b2" h={8}/>
                         </div>
-                      ))}
-                    </Panel>
-                  )}
-
-                  {/* Ventas por día de semana */}
-                  <Panel>
-                    <SecTitle>Ventas por Día</SecTitle>
-                    {DIAS.map((d,i)=>(
-                      <div key={d} style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px"}}>
-                        <span style={{fontSize:"12px",fontWeight:"600",color:porDia[i]>0?T.text:T.textSub,width:"28px",flexShrink:0}}>{d}</span>
-                        <Barra pct={porDia[i]/maxDia*100} color={porDia[i]===Math.max(...porDia)?"#16a34a":"#0ea5e9"} h={8}/>
-                        <span style={{fontSize:"12px",fontWeight:"700",color:T.text,width:"20px",textAlign:"right",flexShrink:0}}>{porDia[i]}</span>
+                        <Barra pct={d.t/maxCli*100} color="#7c3aed" h={7}/>
                       </div>
                     ))}
-                  </Panel>
-                </div>
+                  </Acordeon>
+                )}
 
-                {/* Ventas por hora */}
-                {horasActivas.length>0 && (
-                  <Panel>
-                    <SecTitle>Flujo de Ventas por Hora</SecTitle>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(68px,1fr))",gap:"8px"}}>
+                <Acordeon id="dias" titulo="Ventas por Día de Semana" resumen={`Mejor: ${mejorDia} · ${Math.max(...porDia)} ventas`}>
+                  {DIAS.map((d,i)=>(
+                    <div key={d} style={{display:"flex",alignItems:"center",gap:"10px",marginBottom:"8px"}}>
+                      <span style={{fontSize:"12px",fontWeight:"600",color:porDia[i]>0?T.text:T.textSub,width:"28px",flexShrink:0}}>{d}</span>
+                      <Barra pct={porDia[i]/maxDia*100} color={porDia[i]===Math.max(...porDia)?"#16a34a":"#0ea5e9"} h={8}/>
+                      <span style={{fontSize:"12px",fontWeight:"700",color:T.text,width:"20px",textAlign:"right",flexShrink:0}}>{porDia[i]}</span>
+                    </div>
+                  ))}
+                </Acordeon>
+
+                {horasActivas.length>0&&(
+                  <Acordeon id="horas" titulo="Flujo por Hora" resumen={mejorHora?`Hora pico: ${fmtHora(mejorHora.h)} con ${mejorHora.v} ventas`:"Sin datos"}>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(60px,1fr))",gap:"6px"}}>
                       {horasActivas.map(({h,v})=>{
                         const pct=v/maxHora;
                         const clr=pct>=0.8?"#dc2626":pct>=0.5?"#d97706":"#2563eb";
                         return (
                           <div key={h} style={{textAlign:"center"}}>
-                            <div style={{height:"60px",display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:"4px"}}>
-                              <div style={{width:"32px",backgroundColor:clr,borderRadius:"4px 4px 0 0",height:`${Math.round(pct*60)}px`,minHeight:"4px",transition:"height 0.5s ease"}}/>
+                            <div style={{height:"52px",display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:"3px"}}>
+                              <div style={{width:"28px",backgroundColor:clr,borderRadius:"3px 3px 0 0",height:`${Math.round(pct*52)}px`,minHeight:"4px",transition:"height 0.4s ease"}}/>
                             </div>
                             <div style={{fontSize:"11px",fontWeight:"700",color:T.text}}>{v}</div>
                             <div style={{fontSize:"10px",color:T.textSub}}>{fmtHora(h)}</div>
@@ -1411,7 +1394,7 @@ function App() {
                         );
                       })}
                     </div>
-                  </Panel>
+                  </Acordeon>
                 )}
               </>}
             </div>
